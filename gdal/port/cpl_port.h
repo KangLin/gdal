@@ -729,7 +729,9 @@ static inline int CPLIsFinite(double f) { return !__isnan(f) && !__isinf(f); }
 /*! @cond Doxygen_Suppress */
 extern "C++" {
 
-template <bool b> struct CPLStaticAssert {};
+template <bool b> struct CPLStaticAssert {
+	static void my_function() {}
+};
 template<> struct CPLStaticAssert<true>
 {
     static void my_function() {}
