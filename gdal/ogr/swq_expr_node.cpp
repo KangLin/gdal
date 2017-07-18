@@ -45,7 +45,7 @@
 #include "cpl_string.h"
 #include "ogr_geometry.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                           swq_expr_node()                            */
@@ -177,6 +177,18 @@ swq_expr_node::~swq_expr_node()
         delete papoSubExpr[i];
     CPLFree( papoSubExpr );
     delete geometry_value;
+}
+
+/************************************************************************/
+/*                          MarkAsTimestamp()                           */
+/************************************************************************/
+
+void swq_expr_node::MarkAsTimestamp()
+
+{
+    CPLAssert( eNodeType == SNT_CONSTANT );
+    CPLAssert( field_type == SWQ_STRING );
+    field_type = SWQ_TIMESTAMP;
 }
 
 /************************************************************************/

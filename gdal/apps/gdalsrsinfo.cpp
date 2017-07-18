@@ -36,7 +36,7 @@
 #include "ogrsf_frmts.h"
 #include "commonutils.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 bool FindSRS( const char *pszInput, OGRSpatialReference &oSRS );
 CPLErr PrintSRS( const OGRSpatialReference &oSRS,
@@ -344,6 +344,9 @@ bool FindSRS( const char *pszInput, OGRSpatialReference &oSRS )
         CPLDebug( "gdalsrsinfo",
                   "trying to get SRS from user input [%s]", pszInput );
 
+        if( CPLGetConfigOption("CPL_ALLOW_VSISTDIN", NULL) == NULL )
+            CPLSetConfigOption("CPL_ALLOW_VSISTDIN", "YES");
+
         eErr = oSRS.SetFromUserInput( pszInput );
 
        if(  eErr != OGRERR_NONE ) {
@@ -384,7 +387,7 @@ CPLErr PrintSRS( const OGRSpatialReference &oSRS,
     if ( EQUAL("proj4", pszOutputType ) ) {
         if ( bPrintSep ) printf( "PROJ.4 : ");
         oSRS.exportToProj4( &pszOutput );
-        printf( "\'%s\'\n", pszOutput );
+        printf( "%s\n", pszOutput );
     }
 
     else if ( EQUAL("wkt", pszOutputType ) ) {

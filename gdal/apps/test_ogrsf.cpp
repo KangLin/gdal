@@ -37,7 +37,7 @@
 #include <algorithm>
 #include <limits>
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 int     bReadOnly = FALSE;
 int     bVerbose = TRUE;
@@ -838,7 +838,8 @@ static int TestCreateLayer( GDALDriver* poDriver, OGRwkbGeometryType eGeomType )
         !EQUAL(poDriver->GetDescription(), "KML") &&
         !EQUAL(poDriver->GetDescription(), "LIBKML") &&
         !EQUAL(poDriver->GetDescription(), "PDF") &&
-        !EQUAL(poDriver->GetDescription(), "GeoJSON") )
+        !EQUAL(poDriver->GetDescription(), "GeoJSON") &&
+        !EQUAL(poDriver->GetDescription(), "OGR_GMT") )
     {
         /* Reopen dataset */
         poDS = LOG_ACTION((GDALDataset*)GDALOpenEx( osFilename,
@@ -1794,16 +1795,15 @@ static int TestSpatialFilter( OGRLayer *poLayer, int iGeomField )
     LOG_ACTION(poLayer->ResetReading());
 
     bool bFound = false;
+    GIntBig nIterCount = 0;
     while( (poFeature = LOG_ACTION(poLayer->GetNextFeature())) != NULL )
     {
         if( poFeature->Equal(poTargetFeature) )
         {
             bFound = true;
-            DestroyFeatureAndNullify(poFeature);
-            break;
         }
-        else
-            DestroyFeatureAndNullify(poFeature);
+        nIterCount ++;
+        DestroyFeatureAndNullify(poFeature);
     }
 
     if( !bFound )
@@ -1818,6 +1818,35 @@ static int TestSpatialFilter( OGRLayer *poLayer, int iGeomField )
     }
 
     nInclusiveCount = LOG_ACTION(poLayer->GetFeatureCount());
+
+    // Identity check doesn't always work depending on feature geometries
+    if( nIterCount > nInclusiveCount )
+    {
+        bRet = FALSE;
+        printf( "ERROR: GetFeatureCount() with spatial filter smaller (%d) than "
+                "count while iterating over features (%d).\n",
+                static_cast<int>(nInclusiveCount), static_cast<int>(nIterCount));
+    }
+
+    LOG_ACTION(poLayer->SetAttributeFilter("1=1"));
+    GIntBig nShouldBeSame = LOG_ACTION(poLayer->GetFeatureCount());
+    LOG_ACTION(poLayer->SetAttributeFilter(NULL));
+    if( nShouldBeSame != nInclusiveCount )
+    {
+        bRet = FALSE;
+        printf( "ERROR: Attribute filter seems to be make spatial "
+                "filter fail with GetFeatureCount().\n" );
+    }
+
+    LOG_ACTION(poLayer->SetAttributeFilter("1=0"));
+    GIntBig nShouldBeZero = LOG_ACTION(poLayer->GetFeatureCount());
+    LOG_ACTION(poLayer->SetAttributeFilter(NULL));
+    if( nShouldBeZero != 0 )
+    {
+        bRet = FALSE;
+        printf( "ERROR: Attribute filter seems to be ignored in "
+                "GetFeatureCount() when spatial filter is set.\n" );
+    }
 
 /* -------------------------------------------------------------------- */
 /*      Construct exclusive filter.                                     */
@@ -2196,7 +2225,7 @@ static int TestAttributeFilter( CPL_UNUSED GDALDataset* poDS, OGRLayer *poLayer 
     for(i=0;i<poTargetFeature->GetFieldCount();i++)
     {
         eType = poTargetFeature->GetFieldDefnRef(i)->GetType();
-        if (poTargetFeature->IsFieldSet(i) &&
+        if (poTargetFeature->IsFieldSetAndNotNull(i) &&
             (eType == OFTString || eType == OFTInteger || eType == OFTReal))
         {
             break;
@@ -2908,7 +2937,7 @@ static int TestOGRLayerIgnoreFields( OGRLayer* poLayer )
         {
             for(int i=0;i<poFeature->GetFieldCount();i++)
             {
-                if( poFeature->IsFieldSet(i) )
+                if( poFeature->IsFieldSetAndNotNull(i) )
                 {
                     iFieldNonEmpty = i;
                     break;
@@ -2919,7 +2948,7 @@ static int TestOGRLayerIgnoreFields( OGRLayer* poLayer )
         {
             for(int i=0;i<poFeature->GetFieldCount();i++)
             {
-                if( i != iFieldNonEmpty && poFeature->IsFieldSet(i) )
+                if( i != iFieldNonEmpty && poFeature->IsFieldSetAndNotNull(i) )
                 {
                     iFieldNonEmpty2 = i;
                     break;
@@ -2965,7 +2994,7 @@ static int TestOGRLayerIgnoreFields( OGRLayer* poLayer )
     LOG_ACTION(poLayer->ResetReading());
     while( (poFeature = LOG_ACTION(poLayer->GetNextFeature())) != NULL )
     {
-        if( iFieldNonEmpty >= 0 && poFeature->IsFieldSet(iFieldNonEmpty) )
+        if( iFieldNonEmpty >= 0 && poFeature->IsFieldSetAndNotNull(iFieldNonEmpty) )
         {
             delete poFeature;
             printf( "ERROR: After SetIgnoredFields(), found a non empty field that should have been ignored.\n" );
@@ -2973,7 +3002,7 @@ static int TestOGRLayerIgnoreFields( OGRLayer* poLayer )
             return FALSE;
         }
 
-        if( iFieldNonEmpty2 >= 0 && poFeature->IsFieldSet(iFieldNonEmpty2) )
+        if( iFieldNonEmpty2 >= 0 && poFeature->IsFieldSetAndNotNull(iFieldNonEmpty2) )
             bFoundNonEmpty2 = TRUE;
 
         if( bGeomNonEmpty && poFeature->GetGeometryRef() != NULL)

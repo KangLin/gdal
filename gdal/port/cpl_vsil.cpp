@@ -53,7 +53,7 @@
 #include "cpl_vsi_virtual.h"
 
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                             VSIReadDir()                             */
@@ -626,7 +626,7 @@ VSIVirtualHandle *VSIFilesystemHandler::Open( const char *pszFilename,
 #endif
 
 /************************************************************************/
-/*                             VSIFOpenExL()                              */
+/*                             VSIFOpenExL()                            */
 /************************************************************************/
 
 /**
@@ -738,6 +738,10 @@ int VSIFCloseL( VSILFILE * fp )
  *
  * Analog of the POSIX fseek() call.
  *
+ * Caution: vsi_l_offset is a unsigned type, so SEEK_CUR can only be used
+ * for positive seek. If negative seek is needed, use
+ * handle->Seek( handle->Tell() + negative_offset, SEEK_SET ).
+ *
  * @param nOffset offset in bytes.
  * @param nWhence one of SEEK_SET, SEEK_CUR or SEEK_END.
  *
@@ -754,6 +758,10 @@ int VSIFCloseL( VSILFILE * fp )
  *
  * Analog of the POSIX fseek() call.
  *
+ * Caution: vsi_l_offset is a unsigned type, so SEEK_CUR can only be used
+ * for positive seek. If negative seek is needed, use
+ * VSIFSeekL( fp, VSIFTellL(fp) + negative_offset, SEEK_SET ).
+ * 
  * @param fp file handle opened with VSIFOpenL().
  * @param nOffset offset in bytes.
  * @param nWhence one of SEEK_SET, SEEK_CUR or SEEK_END.
@@ -1388,7 +1396,8 @@ int VSIIngestFile( VSILFILE* fp,
 
         // With "large" VSI I/O API we can read data chunks larger than
         // VSIMalloc could allocate. Catch it here.
-        if( nDataLen > static_cast<vsi_l_offset>(static_cast<size_t>(nDataLen))
+        if( nDataLen != static_cast<vsi_l_offset>(static_cast<size_t>(nDataLen))
+            || nDataLen + 1 < nDataLen
             || (nMaxSize >= 0 &&
                 nDataLen > static_cast<vsi_l_offset>(nMaxSize)) )
         {
@@ -1576,8 +1585,8 @@ VSIFileManager *VSIFileManager::Get()
     {
         nConstructerPID = static_cast<GPtrDiff_t>(CPLGetPID());
 #ifdef DEBUG_VERBOSE
-        printf("Thread %d: VSIFileManager in construction\n",  // ok
-               nConstructerPID);
+        printf("Thread " CPL_FRMT_GIB": VSIFileManager in construction\n",  // ok
+               static_cast<GIntBig>(nConstructerPID));
 #endif
         poManager = new VSIFileManager;
         VSIInstallLargeFileHandler();
@@ -1592,6 +1601,8 @@ VSIFileManager *VSIFileManager::Get()
         VSIInstallCurlStreamingFileHandler();
         VSIInstallS3FileHandler();
         VSIInstallS3StreamingFileHandler();
+        VSIInstallGSFileHandler();
+        VSIInstallGSStreamingFileHandler();
 #endif
         VSIInstallStdinHandler();
         VSIInstallStdoutHandler();
@@ -1600,8 +1611,8 @@ VSIFileManager *VSIFileManager::Get()
         VSIInstallCryptFileHandler();
 
 #ifdef DEBUG_VERBOSE
-        printf("Thread %d: VSIFileManager construction finished\n",  // ok
-               nConstructerPID);
+        printf("Thread " CPL_FRMT_GIB": VSIFileManager construction finished\n",  // ok
+               static_cast<GIntBig>(nConstructerPID));
 #endif
         nConstructerPID = 0;
     }

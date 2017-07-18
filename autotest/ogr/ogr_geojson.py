@@ -824,6 +824,19 @@ def ogr_geojson_18():
     lyr = None
     ds = None
 
+    ds = ogr.Open('data/esripolygonempty.json')
+    if ds is None:
+        gdaltest.post_reason('Failed to open datasource')
+        return 'fail'
+    lyr = ds.GetLayer(0)
+    feature = lyr.GetNextFeature()
+    if feature.GetGeometryRef().ExportToWkt() != 'POLYGON EMPTY':
+        feature.DumpReadable()
+        return 'fail'
+
+    lyr = None
+    ds = None
+
     return 'success'
 
 ###############################################################################
@@ -1161,6 +1174,7 @@ def ogr_geojson_25():
             gdaltest.post_reason('failure at feat index %d' % i)
             feat.DumpReadable()
             print(expected_results[i])
+            print(feat.GetField('name'))
             return 'fail'
     ds = None
 
@@ -1179,6 +1193,25 @@ def ogr_geojson_25():
         return 'fail'
     feat = lyr.GetNextFeature()
     if ogrtest.check_feature_geometry(feat, 'LINESTRING (100 1000,110 1000,110 1100)') != 0:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    ds = None
+
+    ds = ogr.Open('data/topojson3.topojson')
+    lyr = ds.GetLayer(0)
+    if lyr.GetName() != 'a_layer':
+        gdaltest.post_reason('failure')
+        return 'fail'
+    feat = lyr.GetNextFeature()
+    if ogrtest.check_feature_geometry(feat, 'LINESTRING (0 0,10 0,0 10,10 0,0 0)') != 0:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    lyr = ds.GetLayer(1)
+    if lyr.GetName() != 'TopoJSON':
+        gdaltest.post_reason('failure')
+        return 'fail'
+    feat = lyr.GetNextFeature()
+    if ogrtest.check_feature_geometry(feat, 'LINESTRING (0 0,10 0,0 10,10 0,0 0)') != 0:
         gdaltest.post_reason('failure')
         return 'fail'
     ds = None
@@ -1519,7 +1552,7 @@ def ogr_geojson_32():
         return 'fail'
 
     feature = lyr.GetNextFeature()
-    ref_geom = ogr.CreateGeometryFromWkt('MULTIPOINT (2 49,3 50)')
+    ref_geom = ogr.CreateGeometryFromWkt('MULTIPOINT M ((2 49 1),(3 50 2))')
     if ogrtest.check_feature_geometry(feature, ref_geom) != 0:
         feature.DumpReadable()
         return 'fail'
@@ -1530,7 +1563,7 @@ def ogr_geojson_32():
     return 'success'
 
 ###############################################################################
-# Test reading ESRI multipoint file with hasZ=true, but only 2 points.
+# Test reading ESRI multipoint file with hasZ=true, but only 2 components.
 
 def ogr_geojson_33():
 
@@ -1569,7 +1602,7 @@ def ogr_geojson_33():
     return 'success'
 
 ###############################################################################
-# Test reading ESRI multipoint file with m, but no z (hasM=true, hasZ omitted)
+# Test reading ESRI multipoint file with z and m
 
 def ogr_geojson_34():
 
@@ -1597,7 +1630,7 @@ def ogr_geojson_34():
         return 'fail'
 
     feature = lyr.GetNextFeature()
-    ref_geom = ogr.CreateGeometryFromWkt('MULTIPOINT (2 49 1,3 50 2)')
+    ref_geom = ogr.CreateGeometryFromWkt('MULTIPOINT ZM ((2 49 1 100),(3 50 2 100))')
     if ogrtest.check_feature_geometry(feature, ref_geom) != 0:
         feature.DumpReadable()
         return 'fail'
@@ -2086,6 +2119,13 @@ def ogr_geojson_41():
     g = ogr.CreateGeometryFromJson('{ "type": "Point", "coordinates" : [ 2, 49], "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::4322" } } }')
     srs = g.GetSpatialReference()
     if srs.ExportToWkt().find('4322') < 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    # But if a crs object is set to null, set no crs
+    g = ogr.CreateGeometryFromJson('{ "type": "Point", "coordinates" : [ 2, 49], "crs": null }')
+    srs = g.GetSpatialReference()
+    if srs:
         gdaltest.post_reason('fail')
         return 'fail'
 
@@ -3363,6 +3403,198 @@ def ogr_geojson_59():
 
     return 'success'
 
+###############################################################################
+# Test null vs unset field
+
+def ogr_geojson_60():
+    if gdaltest.geojson_drv is None:
+        return 'skip'
+
+    ds = gdal.OpenEx("""{ "type": "FeatureCollection", "features": [
+{ "type": "Feature", "properties" : { "foo" : "bar" } },
+{ "type": "Feature", "properties" : { "foo": null } },
+{ "type": "Feature", "properties" : {  } } ] }""")
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    if f['foo'] != 'bar':
+        gdaltest.post_reason('failure')
+        f.DumpReadable()
+        return 'fail'
+    f = lyr.GetNextFeature()
+    if not f.IsFieldNull('foo'):
+        gdaltest.post_reason('failure')
+        f.DumpReadable()
+        return 'fail'
+    f = lyr.GetNextFeature()
+    if f.IsFieldSet('foo'):
+        gdaltest.post_reason('failure')
+        f.DumpReadable()
+        return 'fail'
+
+    # Test writing side
+    gdal.VectorTranslate('/vsimem/ogr_geojson_60.json', ds, format = 'GeoJSON')
+
+    fp = gdal.VSIFOpenL('/vsimem/ogr_geojson_60.json', 'rb')
+    data = gdal.VSIFReadL(1, 10000, fp).decode('ascii')
+    gdal.VSIFCloseL(fp)
+
+    gdal.Unlink('/vsimem/ogr_geojson_60.json')
+    if data.find('"properties": { "foo": "bar" }') < 0 or \
+       data.find('"properties": { "foo": null }') < 0 or \
+       data.find('"properties": { }') < 0:
+        gdaltest.post_reason('failure')
+        print(data)
+        return 'fail'
+
+    return 'success'
+
+
+###############################################################################
+# Test corner cases
+
+def ogr_geojson_61():
+
+    # Invalid JSon
+    with gdaltest.error_handler():
+        ds = gdal.OpenEx("""{ "type": "FeatureCollection", """)
+    if ds is not None:
+        gdaltest.post_reason('failure')
+        return 'fail'
+
+    # Invalid single geometry
+    with gdaltest.error_handler():
+        ds = gdal.OpenEx("""{ "type": "Point", "x" : { "coordinates" : null } } """)
+    if ds is not None:
+        gdaltest.post_reason('failure')
+        return 'fail'
+
+    return 'success'
+
+###############################################################################
+# Test crs object
+
+def ogr_geojson_62():
+
+    # crs type=name tests
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"name" }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"name", "properties":null }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"name", "properties":1 }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"name", "properties":{"name":null} }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"name", "properties":{"name":1} }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"name", "properties":{"name":"x"} }, "features":[] }""")
+
+    ds = gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"name", "properties":{"name": "urn:ogc:def:crs:EPSG::32631"} }, "features":[] }""")
+    lyr = ds.GetLayer(0)
+    srs = lyr.GetSpatialRef()
+    if srs.ExportToWkt().find('32631') < 0:
+        gdaltest.post_reason('failure')
+        return 'fail'
+
+    # crs type=EPSG (not even documented in GJ2008 spec!) tests. Just for coverage completness
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"EPSG" }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"EPSG", "properties":null }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"EPSG", "properties":1 }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"EPSG", "properties":{"code":null} }, "features":[] }""")
+
+    with gdaltest.error_handler():
+        gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"EPSG", "properties":{"code":1} }, "features":[] }""")
+
+    with gdaltest.error_handler():
+        gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"EPSG", "properties":{"code":"x"} }, "features":[] }""")
+
+    ds = gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"EPSG", "properties":{"code": 32631} }, "features":[] }""")
+    lyr = ds.GetLayer(0)
+    srs = lyr.GetSpatialRef()
+    if srs.ExportToWkt().find('32631') < 0:
+        gdaltest.post_reason('failure')
+        return 'fail'
+
+    # crs type=link tests
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"link" }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"link", "properties":null }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"link", "properties":1 }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"link", "properties":{"href":null} }, "features":[] }""")
+
+    with gdaltest.error_handler():
+        gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"link", "properties":{"href":1} }, "features":[] }""")
+
+    with gdaltest.error_handler():
+        gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"link", "properties":{"href": "1"} }, "features":[] }""")
+
+
+    # crs type=OGC (not even documented in GJ2008 spec!) tests. Just for coverage completness
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"OGC" }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"OGC", "properties":null }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"OGC", "properties":1 }, "features":[] }""")
+
+    gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"OGC", "properties":{"urn":null} }, "features":[] }""")
+
+    with gdaltest.error_handler():
+        gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"OGC", "properties":{"urn":1} }, "features":[] }""")
+
+    with gdaltest.error_handler():
+        gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"OGC", "properties":{"urn":"x"} }, "features":[] }""")
+
+    ds = gdal.OpenEx("""{ "type": "FeatureCollection", "crs": { "type":"OGC", "properties":{"urn": "urn:ogc:def:crs:EPSG::32631"} }, "features":[] }""")
+    lyr = ds.GetLayer(0)
+    srs = lyr.GetSpatialRef()
+    if srs.ExportToWkt().find('32631') < 0:
+        gdaltest.post_reason('failure')
+        return 'fail'
+
+    return 'success'
+
+###############################################################################
+# Extensive test of field tye promotion
+
+def ogr_geojson_63():
+
+    ds_ref = ogr.Open('data/test_type_promotion_ref.json')
+    lyr_ref = ds_ref.GetLayer(0)
+    ds = ogr.Open('data/test_type_promotion.json')
+    lyr = ds.GetLayer(0)
+    return ogrtest.compare_layers(lyr, lyr_ref)
+
+###############################################################################
+# Test exporting XYM / XYZM (#6935)
+
+def ogr_geojson_64():
+
+    g = ogr.CreateGeometryFromWkt('POINT ZM(1 2 3 4)')
+    if ogrtest.check_feature_geometry( ogr.CreateGeometryFromJson(g.ExportToJson()), 
+                            ogr.CreateGeometryFromWkt('POINT Z(1 2 3)') ) != 0:
+        return 'fail'
+
+    g = ogr.CreateGeometryFromWkt('POINT M(1 2 3)')
+    if ogrtest.check_feature_geometry( ogr.CreateGeometryFromJson(g.ExportToJson()), 
+                            ogr.CreateGeometryFromWkt('POINT (1 2)') ) != 0:
+        return 'fail'
+
+    g = ogr.CreateGeometryFromWkt('LINESTRING ZM(1 2 3 4,5 6 7 8)')
+    if ogrtest.check_feature_geometry( ogr.CreateGeometryFromJson(g.ExportToJson()), 
+                            ogr.CreateGeometryFromWkt('LINESTRING Z(1 2 3,5 6 7)') ) != 0:
+        return 'fail'
+
+    g = ogr.CreateGeometryFromWkt('LINESTRING M(1 2 3,4 5 6)')
+    if ogrtest.check_feature_geometry( ogr.CreateGeometryFromJson(g.ExportToJson()), 
+                            ogr.CreateGeometryFromWkt('LINESTRING (1 2,4 5)') ) != 0:
+        return 'fail'
+
+    return 'success'
+
 gdaltest_list = [
     ogr_geojson_1,
     ogr_geojson_2,
@@ -3423,6 +3655,11 @@ gdaltest_list = [
     ogr_geojson_57,
     ogr_geojson_58,
     ogr_geojson_59,
+    ogr_geojson_60,
+    ogr_geojson_61,
+    ogr_geojson_62,
+    ogr_geojson_63,
+    ogr_geojson_64,
     ogr_geojson_cleanup ]
 
 if __name__ == '__main__':

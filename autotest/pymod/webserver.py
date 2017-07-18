@@ -42,6 +42,9 @@ from sys import version_info
 
 do_log = False
 
+s3_no_cached_test_changed_content = False
+test_retry_attempt = 0
+
 TIME_SKEW = 30 * 60
 
 class GDAL_Handler(BaseHTTPRequestHandler):
@@ -56,6 +59,13 @@ class GDAL_Handler(BaseHTTPRequestHandler):
             f.close()
 
         if self.path == '/s3_fake_bucket/resource2.bin':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.send_header('Content-Length', 1000000)
+            self.end_headers()
+            return
+
+        if self.path == '/gs_fake_bucket/resource2.bin':
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.send_header('Content-Length', 1000000)
@@ -85,6 +95,20 @@ class GDAL_Handler(BaseHTTPRequestHandler):
             response += 'Date: ' + time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(current_time)) + '\r\n'
             response += '\r\n'
             self.wfile.write(response.encode('ascii'))
+            return
+
+        if self.path == '/test_retry/test.txt':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.send_header('Content-Length', 3)
+            self.end_headers()
+            return
+
+        if self.path == '/test_retry_reset_counter':
+            global test_retry_attempt
+            test_retry_attempt = 0
+            self.send_response(200)
+            self.end_headers()
             return
 
         self.send_error(404,'File Not Found: %s' % self.path)
@@ -441,6 +465,15 @@ class GDAL_Handler(BaseHTTPRequestHandler):
                 self.wfile.write("""foo""".encode('ascii'))
                 return
 
+            if self.path == '/s3_fake_bucket/bar':
+                self.protocol_version = 'HTTP/1.1'
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain')
+                self.send_header('Content-Length', 3)
+                self.end_headers()
+                self.wfile.write("""bar""".encode('ascii'))
+                return
+
             if self.path == '/s3_fake_bucket_with_session_token/resource':
                 self.protocol_version = 'HTTP/1.1'
 
@@ -688,6 +721,222 @@ class GDAL_Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(response.encode('ascii'))
                 return
+
+
+            if self.path == '/s3_non_cached/test.txt':
+                global s3_no_cached_test_changed_content
+                if s3_no_cached_test_changed_content:
+                    content = """bar2""".encode('ascii')
+                else:
+                    content = """foo""".encode('ascii')
+                self.protocol_version = 'HTTP/1.1'
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain')
+                self.send_header('Content-Length', len(content))
+                self.end_headers()
+                self.wfile.write(content)
+                return
+
+            if self.path == '/s3_non_cached/?delimiter=/':
+                self.protocol_version = 'HTTP/1.1'
+                self.send_response(200)
+                self.send_header('Content-type', 'application/xml')
+                if s3_no_cached_test_changed_content:
+                    response = """<?xml version="1.0" encoding="UTF-8"?>
+                        <ListBucketResult>
+                            <Prefix>/</Prefix>
+                            <Contents>
+                                <Key>/test.txt</Key>
+                                <LastModified>1970-01-01T00:00:01.000Z</LastModified>
+                                <Size>40</Size>
+                            </Contents>
+                            <Contents>
+                                <Key>/test2.txt</Key>
+                                <LastModified>1970-01-01T00:00:01.000Z</LastModified>
+                                <Size>40</Size>
+                            </Contents>
+                        </ListBucketResult>
+                    """
+                else:
+                    response = """<?xml version="1.0" encoding="UTF-8"?>
+                        <ListBucketResult>
+                            <Prefix>/</Prefix>
+                            <Contents>
+                                <Key>/test.txt</Key>
+                                <LastModified>1970-01-01T00:00:01.000Z</LastModified>
+                                <Size>30</Size>
+                            </Contents>
+                        </ListBucketResult>
+                    """
+
+                self.send_header('Content-Length', len(response))
+                self.end_headers()
+                self.wfile.write(response.encode('ascii'))
+                return
+
+
+            if self.path == '/s3_non_cached_test_use_content_1':
+                s3_no_cached_test_changed_content = False
+                self.protocol_version = 'HTTP/1.1'
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain')
+                self.send_header('Content-Length', 2)
+                self.end_headers()
+                self.wfile.write("""ok""".encode('ascii'))
+                return
+
+            if self.path == '/s3_non_cached_test_use_content_2':
+                s3_no_cached_test_changed_content = True
+                self.protocol_version = 'HTTP/1.1'
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain')
+                self.send_header('Content-Length', 2)
+                self.end_headers()
+                self.wfile.write("""ok""".encode('ascii'))
+                return
+
+            if self.path == '/latest/meta-data/iam/security-credentials/' or \
+               self.path == '/latest/meta-data/iam/security-credentials/expire_in_past/':
+                self.protocol_version = 'HTTP/1.1'
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain')
+                response = 'myprofile'
+                self.send_header('Content-Length', len(response))
+                self.end_headers()
+                self.wfile.write(response.encode('ascii'))
+                return
+
+            if self.path == '/latest/meta-data/iam/security-credentials/myprofile':
+                self.protocol_version = 'HTTP/1.1'
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                response = """{
+                    "AccessKeyId": "AWS_ACCESS_KEY_ID",
+                    "SecretAccessKey": "AWS_SECRET_ACCESS_KEY",
+                    "Expiration": "3000-01-01T00:00:00Z"
+                }"""
+                self.send_header('Content-Length', len(response))
+                self.end_headers()
+                self.wfile.write(response.encode('ascii'))
+                return
+
+            if self.path == '/latest/meta-data/iam/security-credentials/expire_in_past/myprofile':
+                self.protocol_version = 'HTTP/1.1'
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                response = """{
+                    "AccessKeyId": "AWS_ACCESS_KEY_ID",
+                    "SecretAccessKey": "AWS_SECRET_ACCESS_KEY",
+                    "Expiration": "1970-01-01T00:00:00Z"
+                }"""
+                self.send_header('Content-Length', len(response))
+                self.end_headers()
+                self.wfile.write(response.encode('ascii'))
+                return
+
+
+            if self.path == '/gs_fake_bucket_http_header_file/resource':
+                self.protocol_version = 'HTTP/1.1'
+
+                if 'foo' not in self.headers or self.headers['foo'] != 'bar':
+                    sys.stderr.write('Bad headers: %s\n' % str(self.headers))
+                    self.send_response(403)
+                    return
+
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain')
+                self.send_header('Content-Length', 1)
+                self.end_headers()
+                self.wfile.write("""Y""".encode('ascii'))
+                return
+
+            if self.path == '/gs_fake_bucket/resource':
+                self.protocol_version = 'HTTP/1.1'
+
+                if 'Authorization' not in self.headers:
+                    sys.stderr.write('Bad headers: %s\n' % str(self.headers))
+                    self.send_response(403)
+                    return
+                expected_authorization = 'GOOG1 GS_ACCESS_KEY_ID:8tndu9//BfmN+Kg4AFLdUMZMBDQ='
+                if self.headers['Authorization'] != expected_authorization :
+                    sys.stderr.write("Bad Authorization: '%s'\n" % str(self.headers['Authorization']))
+                    self.send_response(403)
+                    return
+
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain')
+                self.send_header('Content-Length', 3)
+                self.end_headers()
+                self.wfile.write("""foo""".encode('ascii'))
+                return
+
+            if self.path == '/gs_fake_bucket2?delimiter=/&prefix=a_dir/':
+                self.protocol_version = 'HTTP/1.1'
+                self.send_response(200)
+                self.send_header('Content-type', 'application/xml')
+                response = """<?xml version="1.0" encoding="UTF-8"?>
+                    <ListBucketResult>
+                        <Prefix>a_dir/</Prefix>
+                        <NextMarker>bla</NextMarker>
+                        <Contents>
+                            <Key>a_dir/resource3.bin</Key>
+                            <LastModified>1970-01-01T00:00:01.000Z</LastModified>
+                            <Size>123456</Size>
+                        </Contents>
+                    </ListBucketResult>
+                """
+                self.send_header('Content-Length', len(response))
+                self.end_headers()
+                self.wfile.write(response.encode('ascii'))
+                return
+
+            if self.path == '/gs_fake_bucket2?delimiter=/&marker=bla&prefix=a_dir/':
+
+                self.protocol_version = 'HTTP/1.1'
+                self.send_response(200)
+                self.send_header('Content-type', 'application/xml')
+                response = """<?xml version="1.0" encoding="UTF-8"?>
+                    <ListBucketResult>
+                        <Prefix>a_dir/</Prefix>
+                        <Contents>
+                            <Key>a_dir/resource4.bin</Key>
+                            <LastModified>2015-10-16T12:34:56.000Z</LastModified>
+                            <Size>456789</Size>
+                        </Contents>
+                        <CommonPrefixes>
+                            <Prefix>a_dir/subdir/</Prefix>
+                        </CommonPrefixes>
+                    </ListBucketResult>
+                """
+                self.send_header('Content-Length', len(response))
+                self.end_headers()
+                self.wfile.write(response.encode('ascii'))
+                return
+
+
+            global test_retry_attempt
+            if self.path == '/test_retry/test.txt':
+                if test_retry_attempt == 0:
+                    self.protocol_version = 'HTTP/1.1'
+                    self.send_response(502)
+                    self.end_headers()
+                else:
+                    content = """foo""".encode('ascii')
+                    self.protocol_version = 'HTTP/1.1'
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/plain')
+                    self.send_header('Content-Length', len(content))
+                    self.end_headers()
+                    self.wfile.write(content)
+                test_retry_attempt += 1
+                return
+
+            if self.path == '/test_retry_reset_counter':
+                test_retry_attempt = 0
+                self.send_response(200)
+                self.end_headers()
+                return
+
 
             if self.path == '/index.html':
                 self.send_response(200)

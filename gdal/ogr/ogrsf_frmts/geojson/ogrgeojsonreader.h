@@ -168,6 +168,8 @@ void OGRGeoJSONReaderAddOrUpdateField(
 /*                 GeoJSON Parsing Utilities                            */
 /************************************************************************/
 
+lh_entry* OGRGeoJSONFindMemberEntryByName( json_object* poObj,
+                                         const char* pszName );
 json_object* OGRGeoJSONFindMemberByName( json_object* poObj,
                                          const char* pszName );
 GeoJSONObject::Type OGRGeoJSONGetType( json_object* poObj );
@@ -178,8 +180,8 @@ json_object* json_ex_get_object_by_path( json_object* poObj,
 json_object CPL_DLL*  CPL_json_object_object_get( struct json_object* obj,
                                                   const char *key );
 
-bool OGRJSonParse( const char* pszText, json_object** ppoObj,
-                   bool bVerboseError = true );
+bool CPL_DLL OGRJSonParse( const char* pszText, json_object** ppoObj,
+                           bool bVerboseError = true );
 
 /************************************************************************/
 /*                 GeoJSON Geometry Translators                         */

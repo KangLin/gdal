@@ -115,7 +115,7 @@
 #include "emmintrin.h"
 #endif
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 static const double kdfDegreesToRadians = M_PI / 180.0;
 static const double kdfRadiansToDegrees = 180.0 / M_PI;
@@ -218,7 +218,6 @@ float ComputeVal( bool bSrcHasNoData, float fSrcNoDataValue,
     return pfnAlg(afWin, fDstNoDataValue, pData);
 }
 
-// TODO.................
 template<>
 float ComputeVal( bool bSrcHasNoData, GInt32 fSrcNoDataValue,
                   bool /* bIsSrcNoDataNan */,
@@ -362,8 +361,8 @@ CPLErr GDALGeneric3x3Processing(
     if( !bDstHasNoData )
         fDstNoDataValue = 0.0;
 
-    int nLine1Off = 0*nXSize;
-    int nLine2Off = 1*nXSize;
+    int nLine1Off = 0;
+    int nLine2Off = nXSize;
     int nLine3Off = 2*nXSize;
 
     // Move a 3x3 pafWindow over each cell
@@ -1151,6 +1150,8 @@ float GDALHillshadeMultiDirectionalAlg (const T* afWin,
     const double xx = x * x;
     const double yy = y * y;
     const double xx_plus_yy = xx + yy;
+    if( xx_plus_yy == 0.0 )
+        return static_cast<float>(1.0 + psData->sin_altRadians_mul_254);
 
     // ... then the shade value from different azimuth
     double val225_mul_127 = psData->sin_altRadians_mul_127 +
@@ -1178,8 +1179,7 @@ float GDALHillshadeMultiDirectionalAlg (const T* afWin,
                    weight_360 * val360_mul_127) / xx_plus_yy,
             1 + psData->square_z * xx_plus_yy);
 
-    const double cang = 1.0 + (
-        (xx_plus_yy == 0.0) ? psData->sin_altRadians_mul_254 : cang_mul_127);
+    const double cang = 1.0 + cang_mul_127;
 
     return static_cast<float>(cang);
 }
@@ -1638,6 +1638,15 @@ static bool GDALColorReliefGetRGBA( ColorAssociation* pasColorAssociation,
             *pnG = pasColorAssociation[i-1].nG;
             *pnB = pasColorAssociation[i-1].nB;
             *pnA = pasColorAssociation[i-1].nA;
+            return true;
+        }
+
+        if( CPLIsNan(pasColorAssociation[i-1].dfVal) )
+        {
+            *pnR = pasColorAssociation[i].nR;
+            *pnG = pasColorAssociation[i].nG;
+            *pnB = pasColorAssociation[i].nB;
+            *pnA = pasColorAssociation[i].nA;
             return true;
         }
 
@@ -2702,7 +2711,7 @@ class GDALGeneric3x3RasterBand : public GDALRasterBand
     int bIsSrcNoDataNan;
     GDALDataType eReadDT;
 
-    void                    InitWidthNoData( void* pImage );
+    void                    InitWithNoData( void* pImage );
 
   public:
                  GDALGeneric3x3RasterBand( GDALGeneric3x3Dataset<T> *poDS,
@@ -2816,7 +2825,7 @@ GDALGeneric3x3RasterBand<T>::GDALGeneric3x3RasterBand(
 }
 
 template<class T>
-void GDALGeneric3x3RasterBand<T>::InitWidthNoData(void* pImage)
+void GDALGeneric3x3RasterBand<T>::InitWithNoData(void* pImage)
 {
     GDALGeneric3x3Dataset<T> * poGDS = (GDALGeneric3x3Dataset<T> *) poDS;
     if( eDataType == GDT_Byte )
@@ -2853,7 +2862,7 @@ CPLErr GDALGeneric3x3RasterBand<T>::IReadBlock( int /*nBlockXOff*/,
                                     0, 0);
                 if( eErr != CE_None )
                 {
-                    InitWidthNoData(pImage);
+                    InitWithNoData(pImage);
                     return eErr;
                 }
             }
@@ -2917,7 +2926,7 @@ CPLErr GDALGeneric3x3RasterBand<T>::IReadBlock( int /*nBlockXOff*/,
                         0, 0);
                     if( eErr != CE_None )
                     {
-                        InitWidthNoData(pImage);
+                        InitWithNoData(pImage);
                         return eErr;
                     }
                 }
@@ -2968,7 +2977,7 @@ CPLErr GDALGeneric3x3RasterBand<T>::IReadBlock( int /*nBlockXOff*/,
     }
     else if( nBlockYOff == 0 || nBlockYOff == nRasterYSize - 1 )
     {
-        InitWidthNoData(pImage);
+        InitWithNoData(pImage);
         return CE_None;
     }
 
@@ -2991,7 +3000,7 @@ CPLErr GDALGeneric3x3RasterBand<T>::IReadBlock( int /*nBlockXOff*/,
 
             if( eErr != CE_None )
             {
-                InitWidthNoData(pImage);
+                InitWithNoData(pImage);
                 return eErr;
             }
         }
@@ -3009,7 +3018,7 @@ CPLErr GDALGeneric3x3RasterBand<T>::IReadBlock( int /*nBlockXOff*/,
                                  0, 0);
                 if( eErr != CE_None )
                 {
-                    InitWidthNoData(pImage);
+                    InitWithNoData(pImage);
                     return eErr;
                 }
             }
@@ -3788,7 +3797,7 @@ GDALDEMProcessingOptions *GDALDEMProcessingOptionsNew(
             continue;
         }
 
-        if( EQUAL(papszArgv[i],"-of") && i < argc-1 )
+        if( i < argc-1 && EQUAL(papszArgv[i],"-of") )
         {
             ++i;
             CPLFree(psOptions->pszFormat);
@@ -3888,11 +3897,11 @@ GDALDEMProcessingOptions *GDALDEMProcessingOptionsNew(
             bAzimuthSpecified = true;
             psOptions->az = CPLAtof(papszArgv[i]);
         }
-        else if( eUtilityMode == HILL_SHADE &&
+        else if(
             (EQUAL(papszArgv[i], "--alt") ||
              EQUAL(papszArgv[i], "-alt") ||
-             EQUAL(papszArgv[i], "--alt") ||
-             EQUAL(papszArgv[i], "-alt")) && i+1<argc
+             EQUAL(papszArgv[i], "--altitude") ||
+             EQUAL(papszArgv[i], "-altitude")) && i+1<argc
           )
         {
             ++i;

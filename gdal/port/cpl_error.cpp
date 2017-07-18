@@ -43,10 +43,14 @@
 #include "cpl_string.h"
 #include "cpl_vsi.h"
 
+#if !defined(va_copy) && defined(__va_copy)
+#define va_copy __va_copy
+#endif
+
 #define TIMESTAMP_DEBUG
 // #define MEMORY_DEBUG
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 static CPLMutex *hErrorMutex = NULL;
 static void *pErrorHandlerUserData = NULL;
@@ -75,6 +79,7 @@ typedef struct {
     CPLErrorHandlerNode *psHandlerStack;
     int     nLastErrMsgMax;
     int     nFailureIntoWarning;
+    GUInt32 nErrorCounter;
     char    szLastErrMsg[DEFAULT_LAST_ERR_MSG_SIZE];
     // Do not add anything here. szLastErrMsg must be the last field.
     // See CPLRealloc() below.
@@ -87,6 +92,7 @@ static const CPLErrorContext sNoErrorContext =
     NULL,
     0,
     0,
+    0,
     ""
 };
 
@@ -95,6 +101,7 @@ static const CPLErrorContext sWarningContext =
     0,
     CE_Warning,
     NULL,
+    0,
     0,
     0,
     "A warning was emitted"
@@ -107,12 +114,26 @@ static const CPLErrorContext sFailureContext =
     NULL,
     0,
     0,
+    0,
     "A failure was emitted"
 };
 
 #define IS_PREFEFINED_ERROR_CTX(psCtxt) ( psCtx == &sNoErrorContext || \
                                           psCtx == &sWarningContext || \
                                           psCtxt == &sFailureContext )
+
+
+/************************************************************************/
+/*                     CPLErrorContextGetString()                       */
+/************************************************************************/
+
+// Makes clang -fsanitize=undefined happy since it doesn't like
+// dereferencing szLastErrMsg[i>=DEFAULT_LAST_ERR_MSG_SIZE]
+
+static char* CPLErrorContextGetString(CPLErrorContext* psCtxt)
+{
+    return psCtxt->szLastErrMsg;
+}
 
 /************************************************************************/
 /*                         CPLGetErrorContext()                         */
@@ -296,8 +317,9 @@ void CPLErrorV( CPLErr eErrClass, CPLErrorNum err_no, const char *fmt,
                                    + psCtx->nLastErrMsgMax + 1));
                     CPLSetTLS( CTLS_ERRORCONTEXT, psCtx, TRUE );
                 }
-                psCtx->szLastErrMsg[nPreviousSize] = '\n';
-                psCtx->szLastErrMsg[nPreviousSize+1] = '0';
+                char* pszLastErrMsg = CPLErrorContextGetString(psCtx);
+                pszLastErrMsg[nPreviousSize] = '\n';
+                pszLastErrMsg[nPreviousSize+1] = '\0';
                 nPreviousSize++;
             }
         }
@@ -351,6 +373,10 @@ void CPLErrorV( CPLErr eErrClass, CPLErrorNum err_no, const char *fmt,
 /* -------------------------------------------------------------------- */
     psCtx->nLastErrNo = err_no;
     psCtx->eLastErrType = eErrClass;
+    if( psCtx->nErrorCounter == ~(0U) )
+        psCtx->nErrorCounter = 0;
+    else
+        psCtx->nErrorCounter ++;
 
     if( CPLGetConfigOption("CPL_LOG_ERRORS", NULL) != NULL )
         CPLDebug( "CPLError", "%s", psCtx->szLastErrMsg );
@@ -665,6 +691,7 @@ void CPL_STDCALL CPLErrorReset()
     psCtx->nLastErrNo = CPLE_None;
     psCtx->szLastErrMsg[0] = '\0';
     psCtx->eLastErrType = CE_None;
+    psCtx->nErrorCounter = 0;
 }
 
 /**********************************************************************
@@ -711,10 +738,11 @@ void CPL_DLL CPLErrorSetState( CPLErr eErrClass, CPLErrorNum err_no,
     }
 
     psCtx->nLastErrNo = err_no;
-    strncpy(psCtx->szLastErrMsg, pszMsg, psCtx->nLastErrMsgMax);
-    psCtx->szLastErrMsg[
-        std::max(psCtx->nLastErrMsgMax-1,
-                 static_cast<int>( strlen(pszMsg) ))] = '\0';
+    const size_t size = std::min(
+        static_cast<size_t>(psCtx->nLastErrMsgMax-1), strlen(pszMsg) );
+    char* pszLastErrMsg = CPLErrorContextGetString(psCtx);
+    strncpy( pszLastErrMsg, pszMsg, size );
+    pszLastErrMsg[size] = '\0';
     psCtx->eLastErrType = eErrClass;
 }
 
@@ -788,6 +816,29 @@ const char* CPL_STDCALL CPLGetLastErrorMsg()
         return "";
 
     return psCtx->szLastErrMsg;
+}
+
+/**********************************************************************
+ *                          CPLGetErrorCounter()
+ **********************************************************************/
+
+/**
+ * Get the error counter
+ *
+ * Fetches the number of errors emitted in the current error context,
+ * since the last call to CPLErrorReset()
+ *
+ * @return the error counter.
+ * @since GDAL 2.3
+ */
+
+GUInt32 CPL_STDCALL CPLGetErrorCounter()
+{
+    CPLErrorContext *psCtx = CPLGetErrorContext();
+    if( psCtx == NULL )
+        return 0;
+
+    return psCtx->nErrorCounter;
 }
 
 /************************************************************************/

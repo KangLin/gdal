@@ -36,7 +36,7 @@
 
 #include <cmath>
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                               Usage()                                */
@@ -628,8 +628,16 @@ int main( int argc, char *argv[] )
             {
                 if( nMaxFieldSize == 0 ||
                     strlen(projectionRef) <= nMaxFieldSize )
+                {
                     OGR_F_SetFieldString( hFeature, i_SrcSRSName,
                                           projectionRef );
+                }
+                else
+                {
+                    fprintf(stderr,
+                            "Cannot write WKT for file %s as it is too long!\n",
+                            fileNameToWrite);
+                }
             }
             else if( eSrcSRSFormat == FORMAT_PROJ )
             {

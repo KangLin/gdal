@@ -57,7 +57,7 @@
 #include "ogr_srs_api.h"
 
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 CPL_C_START
 void *GDALDeserializeGCPTransformer( CPLXMLNode *psTree );
@@ -1215,7 +1215,7 @@ static GDALGenImgProjTransformInfo* GDALCreateGenImgProjTransformerInternal()
  * Must be used together with REPROJECTION_APPROX_ERROR_IN_SRC_SRS_UNIT to be taken
  * into account.
  * </ul>
- * 
+ *
  * The use case for the *_APPROX_ERROR_* options is when defining an approximate
  * transformer on top of the GenImgProjTransformer globally is not practical.
  * Such a use case is when the source dataset has RPC with a RPC DEM. In such
@@ -1553,7 +1553,7 @@ GDALCreateGenImgProjTransformer2( GDALDatasetH hSrcDS, GDALDatasetH hDstDS,
     }
 
 /* -------------------------------------------------------------------- */
-/*      Handle optional source approximation transformer.               */
+/*      Handle optional destination approximation transformer.          */
 /* -------------------------------------------------------------------- */
     if( psInfo->pDstTransformer )
     {
@@ -1582,17 +1582,51 @@ GDALCreateGenImgProjTransformer2( GDALDatasetH hSrcDS, GDALDatasetH hDstDS,
 /* -------------------------------------------------------------------- */
 /*      Setup reprojection.                                             */
 /* -------------------------------------------------------------------- */
-    if( pszSrcWKT != NULL && strlen(pszSrcWKT) > 0
-        && pszDstWKT != NULL && strlen(pszDstWKT) > 0
-        && !EQUAL(pszSrcWKT, pszDstWKT) )
+    CPLString osSrcWKT = pszSrcWKT ? pszSrcWKT : "";
+    CPLString osDstWKT = pszDstWKT ? pszDstWKT : "";
+
+    if( !osSrcWKT.empty() && !osDstWKT.empty() && !EQUAL(osSrcWKT, osDstWKT) )
     {
-        CPLString osSrcWKT = pszSrcWKT;
+        if( CPLFetchBool( papszOptions, "STRIP_VERT_CS", false ) )
+        {
+            OGRSpatialReference oSRS;
+            oSRS.SetFromUserInput(osSrcWKT);
+            if( oSRS.IsCompound() )
+            {
+                OGR_SRSNode* poNode = oSRS.GetRoot()->GetChild(1);
+                if( poNode != NULL )
+                {
+                    char* pszWKT = NULL;
+                    poNode->exportToWkt(&pszWKT);
+                    osSrcWKT = pszWKT;
+                    CPLFree(pszWKT);
+                }
+            }
+
+            oSRS.SetFromUserInput(osDstWKT);
+            if( oSRS.IsCompound() )
+            {
+                OGR_SRSNode* poNode = oSRS.GetRoot()->GetChild(1);
+                if( poNode != NULL )
+                {
+                    char* pszWKT = NULL;
+                    poNode->exportToWkt(&pszWKT);
+                    osDstWKT = pszWKT;
+                    CPLFree(pszWKT);
+                }
+            }
+        }
+    }
+
+    if( !osSrcWKT.empty() && !osDstWKT.empty() && !EQUAL(osSrcWKT, osDstWKT) )
+    {
         if( hSrcDS
             && CPLFetchBool( papszOptions, "INSERT_CENTER_LONG", true ) )
             osSrcWKT = InsertCenterLong( hSrcDS, osSrcWKT );
 
+
         psInfo->pReprojectArg =
-            GDALCreateReprojectionTransformer( osSrcWKT.c_str(), pszDstWKT );
+            GDALCreateReprojectionTransformer( osSrcWKT, osDstWKT );
         if( psInfo->pReprojectArg == NULL )
         {
             GDALDestroyGenImgProjTransformer( psInfo );
@@ -1875,10 +1909,7 @@ int GDALGenImgProjTransform( void *pTransformArgIn, int bDstToSrc,
                              int *panSuccess )
 {
     GDALGenImgProjTransformInfo *psInfo =
-        (GDALGenImgProjTransformInfo *) pTransformArgIn;
-    double *padfGeoTransform;
-    GDALTransformerFunc pTransformer;
-    void *pTransformArg;
+        static_cast<GDALGenImgProjTransformInfo *>(pTransformArgIn);
 
 #ifdef DEBUG_APPROX_TRANSFORMER
     CPLAssert(nPointCount > 0);
@@ -1894,6 +1925,9 @@ int GDALGenImgProjTransform( void *pTransformArgIn, int bDstToSrc,
 /*      Convert from src (dst) pixel/line to src (dst)                  */
 /*      georeferenced coordinates.                                      */
 /* -------------------------------------------------------------------- */
+    double *padfGeoTransform = NULL;
+    void *pTransformArg = NULL;
+    GDALTransformerFunc pTransformer = NULL;
     if( bDstToSrc )
     {
         padfGeoTransform = psInfo->adfDstGeoTransform;
@@ -2186,6 +2220,7 @@ void *GDALDeserializeGenImgProjTransformer( CPLXMLNode *psTree )
                 GDALDeserializeTransformer( psIter->psChild,
                                             &psInfo->pSrcTransformer,
                                             &psInfo->pSrcTransformArg );
+                break;
             }
         }
     }
@@ -3143,11 +3178,12 @@ GDALDeserializeApproxTransformer( CPLXMLNode *psTree )
  *
  * Applies the following computation, converting a (pixel, line) coordinate
  * into a georeferenced (geo_x, geo_y) location.
- *
+ * <pre>
  *  *pdfGeoX = padfGeoTransform[0] + dfPixel * padfGeoTransform[1]
  *                                 + dfLine  * padfGeoTransform[2];
  *  *pdfGeoY = padfGeoTransform[3] + dfPixel * padfGeoTransform[4]
  *                                 + dfLine  * padfGeoTransform[5];
+ * </pre>
  *
  * @param padfGeoTransform Six coefficient GeoTransform to apply.
  * @param dfPixel Input pixel position.

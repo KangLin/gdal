@@ -3,11 +3,11 @@
 #include "grib2.h"
 
 
-g2int g2_unpack4(unsigned char *cgrib,g2int *iofst,g2int *ipdsnum,g2int **ipdstmpl,
+g2int g2_unpack4(unsigned char *cgrib,g2int cgrib_length,g2int *iofst,g2int *ipdsnum,g2int **ipdstmpl,
                g2int *mappdslen,g2float **coordlist,g2int *numcoord)
 ////$$$  SUBPROGRAM DOCUMENTATION BLOCK
 //                .      .    .                                       .
-// SUBPROGRAM:    g2_unpack4 
+// SUBPROGRAM:    g2_unpack4
 //   PRGMMR: Gilbert         ORG: W/NP11    DATE: 2002-10-31
 //
 // ABSTRACT: This subroutine unpacks Section 4 (Product Definition Section)
@@ -23,17 +23,17 @@ g2int g2_unpack4(unsigned char *cgrib,g2int *iofst,g2int *ipdsnum,g2int **ipdstm
 //     cgrib    - Char array containing Section 4 of the GRIB2 message
 //     iofst    - Bit offset of the beginning of Section 4 in cgrib.
 //
-//   OUTPUT ARGUMENTS:      
+//   OUTPUT ARGUMENTS:
 //     iofst    - Bit offset of the end of Section 4, returned.
 //     ipdsnum  - Product Definition Template Number ( see Code Table 4.0)
-//     ipdstmpl - Pointer to integer array containing the data values for 
+//     ipdstmpl - Pointer to integer array containing the data values for
 //                the specified Product Definition
 //                Template ( N=ipdsnum ).  Each element of this integer
 //                array contains an entry (in the order specified) of Product
 //                Definition Template 4.N
 //     mappdslen- Number of elements in ipdstmpl[].  i.e. number of entries
 //                in Product Definition Template 4.N  ( N=ipdsnum ).
-//     coordlist- Pointer to real array containing floating point values 
+//     coordlist- Pointer to real array containing floating point values
 //                intended to document
 //                the vertical discretisation associated to model data
 //                on hybrid coordinate vertical levels.  (part of Section 4)
@@ -47,11 +47,11 @@ g2int g2_unpack4(unsigned char *cgrib,g2int *iofst,g2int *ipdsnum,g2int **ipdstm
 //                    Template.
 //                6 = memory allocation error
 //
-// REMARKS: 
+// REMARKS:
 //
 // ATTRIBUTES:
 //   LANGUAGE: C
-//   MACHINE:  
+//   MACHINE:
 //
 //$$$//
 {
@@ -67,9 +67,9 @@ g2int g2_unpack4(unsigned char *cgrib,g2int *iofst,g2int *ipdsnum,g2int **ipdstm
       *ipdstmpl=0;    // NULL
       *coordlist=0;    // NULL
 
-      gbit(cgrib,&lensec,*iofst,32);        // Get Length of Section
+      gbit2(cgrib,cgrib_length,&lensec,*iofst,32);        // Get Length of Section
       *iofst=*iofst+32;
-      gbit(cgrib,&isecnum,*iofst,8);         // Get Section Number
+      gbit2(cgrib,cgrib_length,&isecnum,*iofst,8);         // Get Section Number
       *iofst=*iofst+8;
 
       if ( isecnum != 4 ) {
@@ -80,9 +80,9 @@ g2int g2_unpack4(unsigned char *cgrib,g2int *iofst,g2int *ipdsnum,g2int **ipdstm
          return(ierr);
       }
 
-      gbit(cgrib,numcoord,*iofst,16);    // Get num of coordinate values
+      gbit2(cgrib,cgrib_length,numcoord,*iofst,16);    // Get num of coordinate values
       *iofst=*iofst+16;
-      gbit(cgrib,ipdsnum,*iofst,16);    // Get Prod. Def Template num.
+      gbit2(cgrib,cgrib_length,ipdsnum,*iofst,16);    // Get Prod. Def Template num.
       *iofst=*iofst+16;
 
       //   Get Product Definition Template
@@ -113,11 +113,11 @@ g2int g2_unpack4(unsigned char *cgrib,g2int *iofst,g2int *ipdsnum,g2int **ipdstm
       for (i=0;i<mappds->maplen;i++) {
         nbits=abs(mappds->map[i])*8;
         if ( mappds->map[i] >= 0 ) {
-          gbit(cgrib,lipdstmpl+i,*iofst,nbits);
+          gbit2(cgrib,cgrib_length,lipdstmpl+i,*iofst,nbits);
         }
         else {
-          gbit(cgrib,&isign,*iofst,1);
-          gbit(cgrib,lipdstmpl+i,*iofst+1,nbits-1);
+          gbit2(cgrib,cgrib_length,&isign,*iofst,1);
+          gbit2(cgrib,cgrib_length,lipdstmpl+i,*iofst+1,nbits-1);
           if (isign == 1) lipdstmpl[i]=-1*lipdstmpl[i];
         }
         *iofst=*iofst+nbits;
@@ -140,11 +140,11 @@ g2int g2_unpack4(unsigned char *cgrib,g2int *iofst,g2int *ipdsnum,g2int **ipdstm
         for (i=*mappdslen;i<newlen;i++) {
           nbits=abs(mappds->ext[j])*8;
           if ( mappds->ext[j] >= 0 ) {
-            gbit(cgrib,lipdstmpl+i,*iofst,nbits);
+            gbit2(cgrib,cgrib_length,lipdstmpl+i,*iofst,nbits);
           }
           else {
-            gbit(cgrib,&isign,*iofst,1);
-            gbit(cgrib,lipdstmpl+i,*iofst+1,nbits-1);
+            gbit2(cgrib,cgrib_length,&isign,*iofst,1);
+            gbit2(cgrib,cgrib_length,lipdstmpl+i,*iofst+1,nbits-1);
             if (isign == 1) lipdstmpl[i]=-1*lipdstmpl[i];
           }
           *iofst=*iofst+nbits;
@@ -173,12 +173,12 @@ g2int g2_unpack4(unsigned char *cgrib,g2int *iofst,g2int *ipdsnum,g2int **ipdstm
          else {
             *coordlist=lcoordlist;
          }
-        gbits(cgrib,coordieee,*iofst,32,0,*numcoord);
+        gbits(cgrib,cgrib_length,coordieee,*iofst,32,0,*numcoord);
         rdieee(coordieee,*coordlist,*numcoord);
         free(coordieee);
         *iofst=*iofst+(32*(*numcoord));
       }
-      
+
       return(ierr);    // End of Section 4 processing
 
 }

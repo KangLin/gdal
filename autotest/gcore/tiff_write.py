@@ -35,6 +35,7 @@ import shutil
 from osgeo import osr
 
 sys.path.append( '../pymod' )
+sys.path.append('../../gdal/swig/python/samples')
 
 import gdaltest
 
@@ -444,7 +445,7 @@ def tiff_write_13():
         return 'fail'
 
     if md['LIBTIFF'] == 'INTERNAL':
-        if size > 22804:
+        if size > 22816:
             gdaltest.post_reason('fail: bad size')
             print(size)
             return 'fail'
@@ -3570,6 +3571,13 @@ def tiff_write_87():
     data_main = int(ds.GetRasterBand(1).GetMetadataItem('BLOCK_OFFSET_0_0', 'TIFF'))
 
     ds = None
+
+    import validate_cloud_optimized_geotiff
+    try:
+        validate_cloud_optimized_geotiff.validate('tmp/tiff_write_87_dst.tif', check_tiled = False)
+    except:
+        gdaltest.post_reason('validate_cloud_optimized_geotiff failed')
+        return 'fail'
 
     gdaltest.tiff_drv.Delete( 'tmp/tiff_write_87_src.tif' )
     gdaltest.tiff_drv.Delete( 'tmp/tiff_write_87_dst.tif' )
@@ -7451,6 +7459,36 @@ def tiff_write_162():
     return 'success'
 
 ###############################################################################
+# Test creating a file that would trigger strip chopping (#6924)
+
+def tiff_write_163():
+
+    # Was a libtiff 4.0.8 regression
+    if gdaltest.tiff_drv.GetMetadataItem('LIBTIFF').find('4.0.8') >= 0:
+        print('Test broken with libtiff 4.0.8')
+        return 'skip'
+
+    gdal.Translate('/vsimem/tiff_write_163.tif', 'data/byte.tif',
+                   options = '-outsize 1 20000 -co BLOCKYSIZE=20000 -co PROFILE=BASELINE' )
+    ds = gdal.Open('/vsimem/tiff_write_163.tif')
+    cs = ds.GetRasterBand(1).Checksum()
+    if cs != 47567:
+        gdaltest.post_reason('fail')
+        print(cs)
+        return 'fail'
+    # Check that IsBlockAvailable() works properly in that mode
+    offset_0_2 = ds.GetRasterBand(1).GetMetadataItem('BLOCK_OFFSET_0_2', 'TIFF')
+    if offset_0_2 != str(146 + 2 * 8192):
+        gdaltest.post_reason('fail')
+        print(offset_0_2)
+        return 'fail'
+    ds = None
+
+    gdaltest.tiff_drv.Delete( '/vsimem/tiff_write_163.tif' )
+
+    return 'success'
+
+###############################################################################
 # Ask to run again tests with GDAL_API_PROXY=YES
 
 def tiff_write_api_proxy():
@@ -7642,10 +7680,11 @@ gdaltest_list = [
     tiff_write_160,
     tiff_write_161,
     tiff_write_162,
+    tiff_write_163,
     #tiff_write_api_proxy,
     tiff_write_cleanup ]
 
-# gdaltest_list = [ tiff_write_1, tiff_write_161 ]
+# gdaltest_list = [ tiff_write_1, tiff_write_163 ]
 
 if __name__ == '__main__':
 

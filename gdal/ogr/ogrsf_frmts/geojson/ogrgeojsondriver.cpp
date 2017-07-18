@@ -26,11 +26,26 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
-#include <cpl_conv.h>
-#include <cpl_http.h>
+#include "cpl_port.h"
 #include "ogr_geojson.h"
 
-CPL_CVSID("$Id$");
+#include <stdlib.h>
+#include <string.h>
+
+#include "cpl_conv.h"
+#include "cpl_error.h"
+#include "cpl_http.h"
+#include "cpl_string.h"
+#include "cpl_vsi.h"
+// #include "json_object.h"
+#include "gdal.h"
+#include "gdal_priv.h"
+#include "ogr_core.h"
+#include "ogr_feature.h"
+#include "ogrgeojsonutils.h"
+#include "ogrsf_frmts.h"
+
+CPL_CVSID("$Id$")
 
 class OGRESRIFeatureServiceDataset;
 
@@ -43,6 +58,7 @@ class OGRESRIFeatureServiceLayer: public OGRLayer
     OGRESRIFeatureServiceDataset* poDS;
     OGRFeatureDefn* poFeatureDefn;
     GIntBig         nFeaturesRead;
+    GIntBig         nFirstFID;
     GIntBig         nLastFID;
     bool            bOtherPage;
     bool            bUseSequentialFID;
@@ -101,6 +117,7 @@ OGRESRIFeatureServiceLayer::OGRESRIFeatureServiceLayer(
     OGRESRIFeatureServiceDataset* poDSIn) :
     poDS(poDSIn),
     nFeaturesRead(0),
+    nFirstFID(0),
     nLastFID(0),
     bOtherPage(false),
     bUseSequentialFID(false)
@@ -158,12 +175,22 @@ OGRFeature* OGRESRIFeatureServiceLayer::GetNextFeature()
             if( poSrcFeat == NULL )
                 return NULL;
             bOtherPage = true;
+            if( bWasInFirstPage && poSrcFeat->GetFID() != 0 &&
+                poSrcFeat->GetFID() == nFirstFID )
+            {
+                // End-less looping
+                CPLDebug("ESRIJSON", "Scrolling not working. Stopping");
+                delete poSrcFeat;
+                return NULL;
+            }
+            if( bWasInFirstPage && poSrcFeat->GetFID() == 0 &&
+                nLastFID == nFeaturesRead - 1 )
+            {
+                bUseSequentialFID = true;
+            }
         }
-        if( bOtherPage && bWasInFirstPage && poSrcFeat->GetFID() == 0 &&
-            nLastFID == nFeaturesRead - 1 )
-        {
-            bUseSequentialFID = true;
-        }
+        if( nFeaturesRead == 0 )
+            nFirstFID = poSrcFeat->GetFID();
 
         OGRFeature* poFeature = new OGRFeature(poFeatureDefn);
         poFeature->SetFrom(poSrcFeat);

@@ -44,7 +44,7 @@ void CPL_DLL VSIInstallCryptFileHandler();
 void CPL_DLL VSISetCryptKey( const GByte* pabyKey, int nKeySize );
 CPL_C_END
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 static const char VSICRYPT_PREFIX[] = "/vsicrypt/";
 
@@ -1861,7 +1861,7 @@ static GDALDataset* VSICryptOpen(GDALOpenInfo* poOpenInfo)
 {
     if( !VSICryptIdentify(poOpenInfo) )
         return NULL;
-    return (GDALDataset*)GDALOpen(
+    return GDALOpen(
         (CPLString(VSICRYPT_PREFIX) + poOpenInfo->pszFilename).c_str(),
         poOpenInfo->eAccess );
 }
@@ -2057,10 +2057,6 @@ void VSIInstallCryptFileHandler(void)
     GetGDALDriverManager()->RegisterDriver( poDriver );
 #endif
 }
-
-// #ifdef _MSC_VER
-// #pragma warning( pop ) /* 5105 */
-// #endif
 
 #else /* HAVE_CRYPTOPP */
 

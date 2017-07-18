@@ -7,7 +7,7 @@
  ******************************************************************************
  *
  * CREDITS: The RasterLite2 module has been completely funded by:
- * Regione Toscana - Settore Sistema Informativo Territoriale ed 
+ * Regione Toscana - Settore Sistema Informativo Territoriale ed
  * Ambientale (GDAL/RasterLite2 driver)
  * CIG: 644544015A
  *
@@ -34,6 +34,7 @@
  ****************************************************************************/
 
 #include "ogr_sqlite.h"
+#include "ogrsqliteutility.h"
 #include "rasterlite2_header.h"
 
 #include <algorithm>
@@ -44,7 +45,7 @@ static CPLString EscapeNameAndQuoteIfNeeded(const char* pszName)
 {
     if( strchr(pszName, '"') == NULL && strchr(pszName, ':') == NULL )
         return pszName;
-    return '"' + OGRSQLiteEscapeName(pszName) + '"';
+    return '"' + SQLEscapeName(pszName) + '"';
 }
 
 #endif
@@ -77,7 +78,8 @@ bool OGRSQLiteDataSource::OpenRaster()
     nColCount = 0;
     rc = sqlite3_get_table( hDB,
                            "SELECT coverage_name, title, abstract "
-                           "FROM raster_coverages",
+                           "FROM raster_coverages "
+                           "LIMIT 10000",
                            &papszResults, &nRowCount,
                            &nColCount, NULL );
     if( !(rc == SQLITE_OK && nRowCount > 0) )
@@ -93,7 +95,9 @@ bool OGRSQLiteDataSource::OpenRaster()
         const char* pszAbstract = papszRow[2];
         if( pszCoverageName != NULL )
         {
-            rl2CoveragePtr cvg = rl2_create_coverage_from_dbms( hDB, 
+            rl2CoveragePtr cvg = rl2_create_coverage_from_dbms( 
+                                                            hDB,
+                                                            NULL,
                                                             pszCoverageName );
             if( cvg != NULL )
             {
@@ -159,13 +163,14 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
 
     m_aosSubDatasets.Clear();
 
-    m_osCoverageName = OGRSQLiteParamsUnquote( papszTokens[2] );
+    m_osCoverageName = SQLUnescape( papszTokens[2] );
     m_nSectionId =
         (CSLCount(papszTokens) >= 4) ? CPLAtoGIntBig( papszTokens[3] ) : -1;
 
     CSLDestroy(papszTokens);
 
-    m_pRL2Coverage = rl2_create_coverage_from_dbms( hDB, 
+    m_pRL2Coverage = rl2_create_coverage_from_dbms( hDB,
+                                                    NULL,
                                                     m_osCoverageName );
     if( m_pRL2Coverage == NULL )
     {
@@ -184,7 +189,8 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
         char** papszResults2 = NULL;
         char* pszSQL = sqlite3_mprintf(
                 "SELECT section_id, section_name FROM \"%w\" "
-                "ORDER BY section_id",
+                "ORDER BY section_id "
+                "LIMIT 1000000",
                 osSectionTableName.c_str());
         int rc = sqlite3_get_table( hDB,
                 pszSQL,
@@ -243,7 +249,8 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
     // Get extent and resolution
     if( m_nSectionId >= 0 )
     {
-        int ret = rl2_resolve_base_resolution_from_dbms( hDB,
+        int ret = rl2_resolve_base_resolution_from_dbms(hDB,
+                                                        NULL,
                                                         m_osCoverageName,
                                                         TRUE, // by_section
                                                         m_nSectionId,
@@ -259,12 +266,13 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
 
 
         ret = rl2_resolve_full_section_from_dbms( hDB,
-                                                m_osCoverageName,
-                                                m_nSectionId,
-                                                dfXRes, dfYRes,
-                                                &dfMinX, &dfMinY,
-                                                &dfMaxX, &dfMaxY,
-                                                &nWidth, &nHeight );
+                                                  NULL,
+                                                  m_osCoverageName,
+                                                  m_nSectionId,
+                                                  dfXRes, dfYRes,
+                                                  &dfMinX, &dfMinY,
+                                                  &dfMaxX, &dfMaxY,
+                                                  &nWidth, &nHeight );
         if( ret != RL2_OK || nWidth == 0 || nWidth > INT_MAX ||
             nHeight == 0 || nHeight > INT_MAX )
         {
@@ -281,7 +289,8 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
         char* pszSQL = sqlite3_mprintf(
             "SELECT extent_minx, extent_miny, extent_maxx, extent_maxy "
             "FROM raster_coverages WHERE "
-            "Lower(coverage_name) = Lower('%q')", m_osCoverageName.c_str() );
+            "Lower(coverage_name) = Lower('%q') "
+            "LIMIT 1", m_osCoverageName.c_str() );
         char** papszResults = NULL;
         int nRowCount = 0;
         int nColCount = 0;
@@ -679,7 +688,9 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
     if( m_nSectionId < 0 || bSingleSection )
     {
         rl2RasterStatisticsPtr pStatistics =
-            rl2_create_raster_statistics_from_dbms( hDB, m_osCoverageName );
+            rl2_create_raster_statistics_from_dbms( hDB,
+                                                    NULL,
+                                                    m_osCoverageName );
         if( pStatistics != NULL )
         {
             for( int iBand = 1; iBand <= l_nBands; ++iBand )
@@ -715,7 +726,8 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
     // Fetch other metadata
     char* pszSQL = sqlite3_mprintf(
         "SELECT title, abstract FROM raster_coverages WHERE "
-        "Lower(coverage_name) = Lower('%q')", m_osCoverageName.c_str() );
+        "Lower(coverage_name) = Lower('%q') LIMIT 1",
+        m_osCoverageName.c_str() );
     char** papszResults = NULL;
     int nRowCount = 0;
     int nColCount = 0;
@@ -751,7 +763,7 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
         nColCount = 0;
         pszSQL = sqlite3_mprintf(
             "SELECT summary FROM \"%w\" WHERE "
-            "section_id = %d",
+            "section_id = %d LIMIT 1",
             CPLSPrintf( "%s_sections", m_osCoverageName.c_str() ),
             static_cast<int>(m_nSectionId) );
         rc = sqlite3_get_table( hDB, pszSQL,
@@ -813,7 +825,8 @@ void OGRSQLiteDataSource::ListOverviews()
                 "x_resolution_1_2, y_resolution_1_2, "
                 "x_resolution_1_4, y_resolution_1_4,"
                 "x_resolution_1_8, y_resolution_1_8 "
-                "FROM \"%w\" ORDER BY pyramid_level",
+                "FROM \"%w\" ORDER BY pyramid_level "
+                "LIMIT 1000",
                 CPLSPrintf( "%s_levels", m_osCoverageName.c_str() ) );
         }
         else
@@ -824,7 +837,8 @@ void OGRSQLiteDataSource::ListOverviews()
                 "x_resolution_1_4, y_resolution_1_4,"
                 "x_resolution_1_8, y_resolution_1_8 "
                 "FROM \"%w\" WHERE section_id = %d "
-                "ORDER BY pyramid_level",
+                "ORDER BY pyramid_level "
+                "LIMIT 1000",
                 CPLSPrintf( "%s_section_levels", m_osCoverageName.c_str() ),
                 static_cast<int>(m_nSectionId) );
         }
@@ -914,7 +928,7 @@ void OGRSQLiteDataSource::CreateRL2OverviewDatasetIfNeeded( double dfXRes,
     const double dfMinY = dfMaxY + m_adfGeoTransform[5] * nRasterYSize;
     poOvrDS->nRasterXSize = static_cast<int>(0.5 + (dfMaxX - dfMinX) / dfXRes);
     poOvrDS->nRasterYSize = static_cast<int>(0.5 + (dfMaxY - dfMinY) / dfYRes);
-    if( poOvrDS->nRasterXSize <= 1 || poOvrDS->nRasterXSize <= 1 ||
+    if( poOvrDS->nRasterXSize <= 1 || poOvrDS->nRasterYSize <= 1 ||
         (poOvrDS->nRasterXSize < 64 && poOvrDS->nRasterYSize < 64 &&
         !CPLTestBool(CPLGetConfigOption("RL2_SHOW_ALL_PYRAMID_LEVELS", "NO"))) )
     {
@@ -1024,7 +1038,9 @@ GDALColorTable* RL2RasterBand::GetColorTable()
     if( m_poCT == NULL && m_eColorInterp == GCI_PaletteIndex )
     {
         rl2PalettePtr palettePtr =
-            rl2_get_dbms_palette( poGDS->GetDB(),
+            rl2_get_dbms_palette(
+                            poGDS->GetDB(),
+                            NULL,
                             rl2_get_coverage_name(poGDS->GetRL2CoveragePtr()) );
         if( palettePtr )
         {
@@ -1044,7 +1060,7 @@ GDALColorTable* RL2RasterBand::GetColorTable()
                     sEntry.c3 = pabyB[i];
                     sEntry.c4 =
                             (m_bHasNoData && i == m_dfNoDataValue) ? 0 : 255;
-                    m_poCT->SetColorEntry( i, &sEntry ); 
+                    m_poCT->SetColorEntry( i, &sEntry );
                 }
                 rl2_free(pabyR);
                 rl2_free(pabyG);
@@ -1105,7 +1121,7 @@ double RL2RasterBand::GetNoDataValue( int* pbSuccess )
 /*                             IReadBlock()                             */
 /************************************************************************/
 
-CPLErr RL2RasterBand::IReadBlock( int nBlockXOff, int nBlockYOff, void* pData) 
+CPLErr RL2RasterBand::IReadBlock( int nBlockXOff, int nBlockYOff, void* pData)
 {
     OGRSQLiteDataSource* poGDS = reinterpret_cast<OGRSQLiteDataSource*>(poDS);
 #ifdef DEBUG_VERBOSE
@@ -1126,7 +1142,7 @@ CPLErr RL2RasterBand::IReadBlock( int nBlockXOff, int nBlockYOff, void* pData)
 
     sqlite3* hDB = poGDS->GetParentDS() ? poGDS->GetParentDS()->GetDB() :
                                           poGDS->GetDB();
-    rl2CoveragePtr cov = poGDS->GetParentDS() ? 
+    rl2CoveragePtr cov = poGDS->GetParentDS() ?
                                     poGDS->GetParentDS()->GetRL2CoveragePtr():
                                     poGDS->GetRL2CoveragePtr();
     unsigned char nSampleType = 0;
@@ -2039,8 +2055,9 @@ GDALDataset *OGRSQLiteDriverCreateCopy( const char* pszName,
 
     if( CSLFetchNameValue(papszOptions, "APPEND_SUBDATASET") )
     {
-        if( !poDS->Open( pszName, TRUE, NULL, GDAL_OF_RASTER |
-                                              GDAL_OF_VECTOR ) )
+        GDALOpenInfo oOpenInfo(pszName,
+                               GDAL_OF_RASTER | GDAL_OF_VECTOR | GDAL_OF_UPDATE);
+        if( !poDS->Open(&oOpenInfo) )
         {
             delete poDS;
             return NULL;
@@ -2129,7 +2146,7 @@ GDALDataset *OGRSQLiteDriverCreateCopy( const char* pszName,
     rl2CoveragePtr cvg = NULL;
     char* pszSQL = sqlite3_mprintf(
             "SELECT coverage_name "
-            "FROM raster_coverages WHERE coverage_name = '%q'",
+            "FROM raster_coverages WHERE coverage_name = '%q' LIMIT 1",
             osCoverageName.c_str());
     sqlite3_get_table( poDS->GetDB(), pszSQL,  &papszResults, &nRowCount,
                        &nColCount, NULL );
@@ -2137,7 +2154,9 @@ GDALDataset *OGRSQLiteDriverCreateCopy( const char* pszName,
     sqlite3_free_table(papszResults);
     if( nRowCount == 1 )
     {
-        cvg = rl2_create_coverage_from_dbms( poDS->GetDB(), osCoverageName );
+        cvg = rl2_create_coverage_from_dbms( poDS->GetDB(),
+                                             NULL,
+                                             osCoverageName );
         if( cvg == NULL )
         {
             delete poDS;
@@ -2172,11 +2191,12 @@ GDALDataset *OGRSQLiteDriverCreateCopy( const char* pszName,
     {
         const double dfXRes = adfGeoTransform[1];
         const double dfYRes = fabs(adfGeoTransform[5]);
-        bool bStrictResolution = true;
-        bool bMixedResolutions = false;
-        bool bSectionPaths = false;
-        bool bSectionMD5 = false;
-        bool bSectionSummary = false;
+        const bool bStrictResolution = true;
+        const bool bMixedResolutions = false;
+        const bool bSectionPaths = false;
+        const bool bSectionMD5 = false;
+        const bool bSectionSummary = false;
+        const bool bIsQueryable = false;
 
         rl2PixelPtr pNoData =
             CreateNoData( nSampleType, nPixelType, nBandCount, poSrcDS );
@@ -2200,13 +2220,14 @@ GDALDataset *OGRSQLiteDriverCreateCopy( const char* pszName,
                                     nSRSId,
                                     dfXRes,
                                     dfYRes,
-                                    pNoData, 
+                                    pNoData,
                                     pPalette,
                                     bStrictResolution,
                                     bMixedResolutions,
                                     bSectionPaths,
                                     bSectionMD5,
-                                    bSectionSummary) != RL2_OK )
+                                    bSectionSummary,
+                                    bIsQueryable) != RL2_OK )
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                     "rl2_create_dbms_coverage() failed");
@@ -2223,7 +2244,8 @@ GDALDataset *OGRSQLiteDriverCreateCopy( const char* pszName,
     if( cvg == NULL )
     {
         cvg = rl2_create_coverage_from_dbms( poDS->GetDB(),
-                                                        osCoverageName );
+                                             NULL,
+                                             osCoverageName );
         if (cvg == NULL)
         {
             if( pPalette )
@@ -2257,7 +2279,7 @@ GDALDataset *OGRSQLiteDriverCreateCopy( const char* pszName,
     if( rl2_load_raw_tiles_into_dbms(poDS->GetDB(), cvg,
                                      osSectionName,
                                      poSrcDS->GetRasterXSize(),
-                                     poSrcDS->GetRasterYSize(), 
+                                     poSrcDS->GetRasterYSize(),
                                      nSRSId,
                                      dfXMin, dfYMin, dfXMax, dfYMax,
                                      RasterLite2Callback,
@@ -2282,10 +2304,12 @@ GDALDataset *OGRSQLiteDriverCreateCopy( const char* pszName,
     delete poDS;
 
     poDS = new OGRSQLiteDataSource();
-    poDS->Open( CPLSPrintf("RASTERLITE2:%s:%s",
+    GDALOpenInfo oOpenInfo(
+        CPLSPrintf("RASTERLITE2:%s:%s",
                            EscapeNameAndQuoteIfNeeded(pszName).c_str(),
                            EscapeNameAndQuoteIfNeeded(osCoverageName).c_str()),
-                TRUE, NULL, GDAL_OF_RASTER );
+        GDAL_OF_RASTER | GDAL_OF_UPDATE);
+    poDS->Open(&oOpenInfo);
     return poDS;
 }
 

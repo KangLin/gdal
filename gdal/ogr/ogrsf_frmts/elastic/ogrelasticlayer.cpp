@@ -37,12 +37,12 @@
 #include "../geojson/ogrgeojsonwriter.h"
 #include "../geojson/ogrgeojsonreader.h"
 #include "../geojson/ogrgeojsonutils.h"
-#include "../xplane/ogr_xplane_geo_utils.h"
+#include "ogr_geo_utils.h"
 
 #include <cstdlib>
 #include <set>
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                           OGRElasticLayer()                          */
@@ -977,7 +977,7 @@ CPLString OGRElasticLayer::BuildQuery(bool bCountOnly)
     if( !bCountOnly && !m_aoSortColumns.empty() )
     {
         json_object* poSort = BuildSort();
-        osRet += CPLSPrintf(", \"sort\" : %s", 
+        osRet += CPLSPrintf(", \"sort\" : %s",
                             json_object_to_json_string(poSort));
         json_object_put(poSort);
     }
@@ -1218,6 +1218,9 @@ void OGRElasticLayer::BuildFeature(OGRFeature* poFeature, json_object* poSource,
         {
             switch( json_object_get_type(it.val) )
             {
+                case json_type_null:
+                    poFeature->SetFieldNull( oIter->second );
+                    break;
                 case json_type_boolean:
                     poFeature->SetField( oIter->second, json_object_get_boolean(it.val));
                     break;
@@ -1390,7 +1393,7 @@ void OGRElasticLayer::BuildFeature(OGRFeature* poFeature, json_object* poSource,
                         {
                             double dfLat = 0.0;
                             double dfLon = 0.0;
-                            OGRXPlane_ExtendPosition(dfY, dfX, dfRadius,
+                            OGR_GreatCircle_ExtendPosition(dfY, dfX, dfRadius,
                                                       dfStep, &dfLat, &dfLon);
                             poRing->addPoint(dfLon, dfLat);
                         }
@@ -1449,7 +1452,7 @@ void OGRElasticLayer::BuildFeature(OGRFeature* poFeature, json_object* poSource,
         else if( json_object_get_type(it.val) == json_type_object &&
                  !m_poDS->m_bFlattenNestedAttributes )
         {
-            if( m_aosMapToGeomFieldIndex.find(osCurPath + ".coordinates") 
+            if( m_aosMapToGeomFieldIndex.find(osCurPath + ".coordinates")
                                             != m_aosMapToGeomFieldIndex.end() )
             {
                 BuildFeature(poFeature, it.val, osCurPath);
@@ -1992,7 +1995,7 @@ CPLString OGRElasticLayer::BuildJSonFromFeature(OGRFeature *poFeature)
 
     CPLString fields;
     int nJSonFieldIndex = m_poFeatureDefn->GetFieldIndex("_json");
-    if( nJSonFieldIndex >= 0 && poFeature->IsFieldSet(nJSonFieldIndex) )
+    if( nJSonFieldIndex >= 0 && poFeature->IsFieldSetAndNotNull(nJSonFieldIndex) )
     {
         fields = poFeature->GetFieldAsString(nJSonFieldIndex);
     }
@@ -2097,6 +2100,13 @@ CPLString OGRElasticLayer::BuildJSonFromFeature(OGRFeature *poFeature)
 
             json_object* poContainer = GetContainerForFeature(fieldObject, m_aaosFieldPaths[i], oMap);
             const char* pszLastComponent = m_aaosFieldPaths[i].back();
+
+            if( poFeature->IsFieldNull(i) )
+            {
+                json_object_object_add(poContainer,
+                                       pszLastComponent, NULL);
+                continue;
+            }
 
             switch (m_poFeatureDefn->GetFieldDefn(i)->GetType()) {
                 case OFTInteger:
@@ -2254,7 +2264,7 @@ OGRErr OGRElasticLayer::ICreateFeature(OGRFeature *poFeature)
     CPLString osFields(BuildJSonFromFeature(poFeature));
 
     const char* pszId = NULL;
-    if( poFeature->IsFieldSet(0) && !m_bIgnoreSourceID )
+    if( poFeature->IsFieldSetAndNotNull(0) && !m_bIgnoreSourceID )
         pszId = poFeature->GetFieldAsString(0);
 
     // Check to see if we're using bulk uploading
@@ -2312,7 +2322,7 @@ OGRErr OGRElasticLayer::ISetFeature(OGRFeature *poFeature)
 
     FinalizeFeatureDefn();
 
-    if( !poFeature->IsFieldSet(0) )
+    if( !poFeature->IsFieldSetAndNotNull(0) )
     {
         CPLError(CE_Failure, CPLE_AppDefined, "_id field not set");
         return OGRERR_FAILURE;

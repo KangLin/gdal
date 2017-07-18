@@ -38,6 +38,10 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <map>
+#include <set>
+#include <utility>
+#include <vector>
 
 #include "cpl_conv.h"
 #include "cpl_error.h"
@@ -47,7 +51,7 @@
 #include "ogr_core.h"
 #include "ogr_p.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 static const int SHPP_TRISTRIP  = 0;
 static const int SHPP_TRIFAN    = 1;
@@ -283,6 +287,94 @@ void OGRCreateFromMultiPatchPart( OGRGeometryCollection *poGC,
                   nPartType );
 }
 
+static bool RegisterEdge(
+            const double* padfX,
+            const double* padfY,
+            const double* padfZ,
+            int nPart,
+            std::map< std::vector<double>, std::pair<int,int> >& oMapEdges )
+{
+    int idx = 0;
+    if( padfX[0] > padfX[1] )
+    {
+        idx = 1;
+    }
+    else if( padfX[0] == padfX[1] )
+    {
+        if( padfY[0] > padfY[1] )
+        {
+            idx = 1;
+        }
+        else if( padfY[0] == padfY[1] )
+        {
+            if( padfZ[0] > padfZ[1] )
+            {
+                idx = 1;
+            }
+        }
+    }
+    std::vector<double> oVector;
+    oVector.push_back(padfX[idx]);
+    oVector.push_back(padfY[idx]);
+    oVector.push_back(padfZ[idx]);
+    oVector.push_back(padfX[1-idx]);
+    oVector.push_back(padfY[1-idx]);
+    oVector.push_back(padfZ[1-idx]);
+    std::map< std::vector<double>, std::pair<int,int> >::iterator oIter =
+        oMapEdges.find(oVector);
+    if( oIter == oMapEdges.end() )
+    {
+        oMapEdges[oVector] = std::pair<int,int>(nPart, -1);
+    }
+    else
+    {
+        CPLAssert(oIter->second.first >= 0);
+        if( oIter->second.second < 0 )
+            oIter->second.second = nPart;
+        else
+            return false;
+    }
+    return true;
+}
+
+static const std::pair<int,int>& GetEdgeOwners(
+        const double* padfX,
+        const double* padfY,
+        const double* padfZ,
+        const std::map< std::vector<double>, std::pair<int,int> >& oMapEdges )
+{
+    int idx = 0;
+    if( padfX[0] > padfX[1] )
+    {
+        idx = 1;
+    }
+    else if( padfX[0] == padfX[1] )
+    {
+        if( padfY[0] > padfY[1] )
+        {
+            idx = 1;
+        }
+        else if( padfY[0] == padfY[1] )
+        {
+            if( padfZ[0] > padfZ[1] )
+            {
+                idx = 1;
+            }
+        }
+    }
+    std::vector<double> oVector;
+    oVector.push_back(padfX[idx]);
+    oVector.push_back(padfY[idx]);
+    oVector.push_back(padfZ[idx]);
+    oVector.push_back(padfX[1-idx]);
+    oVector.push_back(padfY[1-idx]);
+    oVector.push_back(padfZ[1-idx]);
+    std::map< std::vector<double>, std::pair<int,int> >::const_iterator oIter =
+        oMapEdges.find(oVector);
+    CPLAssert( oIter != oMapEdges.end() );
+    return oIter->second;
+}
+
 /************************************************************************/
 /*                     OGRCreateFromMultiPatch()                        */
 /*                                                                      */
@@ -297,10 +389,160 @@ OGRGeometry* OGRCreateFromMultiPatch       ( int nParts,
                                              const double* padfY,
                                              const double* padfZ)
 {
+    // Deal with particular case of a patch of OuterRing of 4 points
+    // that form a TIN. And be robust to consecutive duplicated triangles !
+    std::map< std::vector<double>, std::pair<int,int> > oMapEdges;
+    bool bTINCandidate = nParts >= 2;
+    std::set<int> oSetDuplicated;
+    for( int iPart = 0; iPart < nParts && panPartStart != NULL; iPart++ )
+    {
+        int nPartPoints = 0;
+
+        // Figure out details about this part's vertex list.
+        if( iPart == nParts - 1 )
+            nPartPoints =
+                nPoints - panPartStart[iPart];
+        else
+            nPartPoints = panPartStart[iPart+1]
+                - panPartStart[iPart];
+        const int nPartStart = panPartStart[iPart];
+
+        if( panPartType[iPart] == SHPP_OUTERRING &&
+            nPartPoints == 4 &&
+            padfX[nPartStart] == padfX[nPartStart + 3] &&
+            padfY[nPartStart] == padfY[nPartStart + 3] &&
+            padfZ[nPartStart] == padfZ[nPartStart + 3] &&
+            !CPLIsNan(padfX[nPartStart]) &&
+            !CPLIsNan(padfX[nPartStart+1]) &&
+            !CPLIsNan(padfX[nPartStart+2]) &&
+            !CPLIsNan(padfY[nPartStart]) &&
+            !CPLIsNan(padfY[nPartStart+1]) &&
+            !CPLIsNan(padfY[nPartStart+2]) &&
+            !CPLIsNan(padfZ[nPartStart]) &&
+            !CPLIsNan(padfZ[nPartStart+1]) &&
+            !CPLIsNan(padfZ[nPartStart+2]) )
+        {
+            bool bDuplicate = false;
+            if( iPart > 0 )
+            {
+                bDuplicate = true;
+                const int nPrevPartStart = panPartStart[iPart-1];
+                for( int j = 0; j < 3; j++ )
+                {
+                    if( padfX[nPartStart + j] == padfX[nPrevPartStart + j] &&
+                        padfY[nPartStart + j] == padfY[nPrevPartStart + j] &&
+                        padfZ[nPartStart + j] == padfZ[nPrevPartStart + j] )
+                    {
+                    }
+                    else
+                    {
+                        bDuplicate = false;
+                        break;
+                    }
+                }
+            }
+            if( bDuplicate )
+            {
+                oSetDuplicated.insert(iPart);
+            }
+            else
+            if ( RegisterEdge( padfX + nPartStart,
+                               padfY + nPartStart,
+                               padfZ + nPartStart,
+                               iPart,
+                               oMapEdges ) &&
+                 RegisterEdge( padfX + nPartStart + 1,
+                               padfY + nPartStart + 1,
+                               padfZ + nPartStart + 1,
+                               iPart,
+                               oMapEdges ) &&
+                 RegisterEdge( padfX + nPartStart + 2,
+                               padfY + nPartStart + 2,
+                               padfZ + nPartStart + 2,
+                               iPart,
+                               oMapEdges ) )
+            {
+                // ok
+            }
+            else
+            {
+                bTINCandidate = false;
+                break;
+            }
+        }
+        else
+        {
+            bTINCandidate = false;
+            break;
+        }
+    }
+    if( bTINCandidate && panPartStart != NULL )
+    {
+        std::set<int> oVisitedParts;
+        std::set<int> oToBeVisitedParts;
+        oToBeVisitedParts.insert(0);
+        while( !oToBeVisitedParts.empty() )
+        {
+            const int iPart = *(oToBeVisitedParts.begin());
+            oVisitedParts.insert(iPart);
+            oToBeVisitedParts.erase(iPart);
+
+            const int nPartStart = panPartStart[iPart];
+            for( int j = 0; j < 3; j++ )
+            {
+                const std::pair<int,int>& oPair =
+                    GetEdgeOwners( padfX + nPartStart + j,
+                                   padfY + nPartStart + j,
+                                   padfZ + nPartStart + j,
+                                   oMapEdges );
+                const int iOtherPart = ( oPair.first == iPart ) ?
+                                         oPair.second : oPair.first;
+                if( iOtherPart >= 0 &&
+                    oVisitedParts.find(iOtherPart) == oVisitedParts.end() )
+                {
+                    oToBeVisitedParts.insert(iOtherPart);
+                }
+            }
+        }
+        if( static_cast<int>(oVisitedParts.size()) ==
+                            nParts - static_cast<int>(oSetDuplicated.size()) )
+        {
+            OGRTriangulatedSurface* poTIN = new OGRTriangulatedSurface();
+            for( int iPart = 0; iPart < nParts; iPart++ )
+            {
+                if( oSetDuplicated.find(iPart) != oSetDuplicated.end() )
+                    continue;
+
+                int nPartStart = 0;
+                if( panPartStart != NULL )
+                {
+                    nPartStart = panPartStart[iPart];
+                }
+
+                OGRPoint oPoint1  (padfX[nPartStart],
+                                   padfY[nPartStart],
+                                   padfZ[nPartStart]);
+
+                OGRPoint oPoint2  (padfX[nPartStart+1],
+                                   padfY[nPartStart+1],
+                                   padfZ[nPartStart+1]);
+
+                OGRPoint oPoint3  (padfX[nPartStart+2],
+                                   padfY[nPartStart+2],
+                                   padfZ[nPartStart+2]);
+
+                OGRTriangle *poTriangle =
+                                new OGRTriangle(oPoint1, oPoint2, oPoint3);
+
+                poTIN->addGeometryDirectly( poTriangle );
+            }
+            return poTIN;
+        }
+    }
+
     OGRGeometryCollection *poGC = new OGRGeometryCollection();
     OGRMultiPolygon *poMP = NULL;
     OGRPolygon *poLastPoly = NULL;
-
     for( int iPart = 0; iPart < nParts; iPart++ )
     {
         int nPartPoints = 0;
@@ -1199,7 +1441,6 @@ OGRErr OGRCreateMultiPatch( OGRGeometry *poGeom,
     poPoints = NULL;
     padfZ = NULL;
     int nBeginLastPart = 0;
-
     for( int j = 0; j < poMPoly->getNumGeometries(); j++ )
     {
         OGRPolygon *poPoly = (OGRPolygon*)(poMPoly->getGeometryRef(j));
@@ -1212,17 +1453,28 @@ OGRErr OGRCreateMultiPatch( OGRGeometry *poGeom,
         OGRLinearRing *poRing = poPoly->getExteriorRing();
         if( nRings == 1 && poRing->getNumPoints() == 4 )
         {
+            int nCorrectedPoints = nPoints;
+            if( nParts > 0 && poPoints != NULL &&
+                panPartType[nParts-1] == SHPP_OUTERRING &&
+                nPoints - panPartStart[nParts-1] == 4 )
+            {
+                nCorrectedPoints--;
+            }
+
             if( nParts > 0 && poPoints != NULL &&
                 ((panPartType[nParts-1] == SHPP_TRIANGLES &&
                   nPoints - panPartStart[nParts-1] == 3) ||
+                 (panPartType[nParts-1] == SHPP_OUTERRING &&
+                  nPoints - panPartStart[nParts-1] == 4) ||
                  panPartType[nParts-1] == SHPP_TRIFAN) &&
                 poRing->getX(0) == poPoints[nBeginLastPart].x &&
                 poRing->getY(0) == poPoints[nBeginLastPart].y &&
                 poRing->getZ(0) == padfZ[nBeginLastPart] &&
-                poRing->getX(1) == poPoints[nPoints-1].x &&
-                poRing->getY(1) == poPoints[nPoints-1].y &&
-                poRing->getZ(1) == padfZ[nPoints-1] )
+                poRing->getX(1) == poPoints[nCorrectedPoints-1].x &&
+                poRing->getY(1) == poPoints[nCorrectedPoints-1].y &&
+                poRing->getZ(1) == padfZ[nCorrectedPoints-1] )
             {
+                nPoints  = nCorrectedPoints;
                 panPartType[nParts-1] = SHPP_TRIFAN;
 
                 poPoints = static_cast<OGRRawPoint *>(
@@ -1236,15 +1488,18 @@ OGRErr OGRCreateMultiPatch( OGRGeometry *poGeom,
             }
             else if( nParts > 0 && poPoints != NULL &&
                 ((panPartType[nParts-1] == SHPP_TRIANGLES &&
-                  nPoints - panPartStart[nParts-1] == 3) ||
+                  nPoints - panPartStart[nParts-1] == 3)||
+                 (panPartType[nParts-1] == SHPP_OUTERRING &&
+                  nPoints - panPartStart[nParts-1] == 4) ||
                  panPartType[nParts-1] == SHPP_TRISTRIP) &&
-                poRing->getX(0) == poPoints[nPoints-2].x &&
-                poRing->getY(0) == poPoints[nPoints-2].y &&
-                poRing->getZ(0) == padfZ[nPoints-2] &&
-                poRing->getX(1) == poPoints[nPoints-1].x &&
-                poRing->getY(1) == poPoints[nPoints-1].y &&
-                poRing->getZ(1) == padfZ[nPoints-1] )
+                poRing->getX(0) == poPoints[nCorrectedPoints-2].x &&
+                poRing->getY(0) == poPoints[nCorrectedPoints-2].y &&
+                poRing->getZ(0) == padfZ[nCorrectedPoints-2] &&
+                poRing->getX(1) == poPoints[nCorrectedPoints-1].x &&
+                poRing->getY(1) == poPoints[nCorrectedPoints-1].y &&
+                poRing->getZ(1) == padfZ[nCorrectedPoints-1] )
             {
+                nPoints  = nCorrectedPoints;
                 panPartType[nParts-1] = SHPP_TRISTRIP;
 
                 poPoints = static_cast<OGRRawPoint *>(
@@ -1269,21 +1524,22 @@ OGRErr OGRCreateMultiPatch( OGRGeometry *poGeom,
                     panPartType = static_cast<int *>(
                         CPLRealloc(panPartType, (nParts + 1) * sizeof(int)));
                     panPartStart[nParts] = nPoints;
-                    panPartType[nParts] = SHPP_TRIANGLES;
+                    panPartType[nParts] = bAllowSHPTTriangle ? SHPP_TRIANGLES :
+                                                               SHPP_OUTERRING;
                     nParts++;
                 }
 
                 poPoints = static_cast<OGRRawPoint *>(
-                    CPLRealloc(poPoints, (nPoints + 3) * sizeof(OGRRawPoint)));
+                    CPLRealloc(poPoints, (nPoints + 4) * sizeof(OGRRawPoint)));
                 padfZ = static_cast<double *>(
-                    CPLRealloc(padfZ, (nPoints + 3) * sizeof(double)));
-                for( int i = 0; i < 3; i++ )
+                    CPLRealloc(padfZ, (nPoints + 4) * sizeof(double)));
+                for( int i = 0; i < 4; i++ )
                 {
                     poPoints[nPoints+i].x = poRing->getX(i);
                     poPoints[nPoints+i].y = poRing->getY(i);
                     padfZ[nPoints+i] = poRing->getZ(i);
                 }
-                nPoints += 3;
+                nPoints += bAllowSHPTTriangle ? 3 : 4;
             }
         }
         else
@@ -1327,13 +1583,11 @@ OGRErr OGRCreateMultiPatch( OGRGeometry *poGeom,
         }
     }
 
-    if( !bAllowSHPTTriangle )
+    if( nParts == 1 && panPartType[0] == SHPP_OUTERRING &&
+        nPoints == 4 )
     {
-        for( int i = 0; i < nParts; i++ )
-        {
-            if( panPartType[i] == SHPP_TRIANGLES )
-                panPartType[i] = SHPP_TRIFAN;
-        }
+        panPartType[0] = SHPP_TRIFAN;
+        nPoints = 3;
     }
 
     delete poGeomToDelete;

@@ -37,7 +37,7 @@
 #include "cpl_conv.h"
 #include "cpl_error.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /*!
   \brief Load geometry (point layers)
@@ -1092,6 +1092,6 @@ int VFKDataBlockSQLite::GetGeometrySQLType() const
         return 2;
     else if (m_nGeometryType == wkbPoint)
         return 1;
-    
+
     return 0; /* unknown geometry type */
 }

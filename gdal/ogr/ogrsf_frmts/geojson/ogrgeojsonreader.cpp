@@ -33,7 +33,7 @@
 #include <json.h> // JSON-C
 #include <ogr_api.h>
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                           OGRGeoJSONReader                           */
@@ -149,11 +149,7 @@ void OGRGeoJSONReader::ReadLayer( OGRGeoJSONDataSource* poDS,
     {
         // If there is none defined, we use 4326.
         poSRS = new OGRSpatialReference();
-        if( OGRERR_NONE != poSRS->importFromEPSG( 4326 ) )
-        {
-            delete poSRS;
-            poSRS = NULL;
-        }
+        poSRS->SetFromUserInput(SRS_WKT_WGS84);
     }
 
     CPLErrorReset();
@@ -237,13 +233,7 @@ void OGRGeoJSONReader::ReadLayer( OGRGeoJSONDataSource* poDS,
     else if( GeoJSONObject::eFeature == objType )
     {
         OGRFeature* poFeature = ReadFeature( poLayer, poObj );
-        if( !AddFeature( poLayer, poFeature ) )
-        {
-            CPLDebug( "GeoJSON", "Translation of single feature failed." );
-
-            delete poLayer;
-            return;
-        }
+        AddFeature( poLayer, poFeature );
     }
 /* -------------------------------------------------------------------- */
 /*      Translate multi-feature FeatureCollection object.               */
@@ -514,7 +504,7 @@ bool OGRGeoJSONReader::GenerateLayerDefn( OGRGeoJSONLayer* poLayer,
 }
 
 /************************************************************************/
-/*                     OGRGeoJSONReaderAddNewField()                    */
+/*                     OGRGeoJSONReaderAddOrUpdateField()               */
 /************************************************************************/
 
 void OGRGeoJSONReaderAddOrUpdateField(
@@ -590,8 +580,6 @@ void OGRGeoJSONReaderAddOrUpdateField(
                 GeoJSONPropertyToFieldType( poVal, eSubType, bArrayAsString );
             poFDefn->SetSubType(OFSTNone);
             poFDefn->SetType(eNewType);
-            if( eSubType == OFSTBoolean )
-                poFDefn->SetWidth(1);
             if( poFDefn->GetType() == OFTString )
             {
                 poFDefn->SetType(GeoJSONStringPropertyToFieldType( poVal ));
@@ -611,10 +599,26 @@ void OGRGeoJSONReaderAddOrUpdateField(
                 poFDefn->SetSubType(OFSTNone);
             }
             else if( eNewType == OFTInteger64 || eNewType == OFTReal ||
-                     eNewType == OFTString )
+                     eNewType == OFTString ||
+                     eNewType == OFTInteger64List || eNewType == OFTRealList ||
+                     eNewType == OFTStringList )
             {
-                poFDefn->SetType(eNewType);
                 poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(eNewType);
+            }
+            else if( eNewType == OFTIntegerList )
+            {
+                if( poFDefn->GetSubType() == OFSTBoolean &&
+                    eSubType != OFSTBoolean )
+                {
+                    poFDefn->SetSubType(OFSTNone);
+                }
+                poFDefn->SetType(eNewType);
+            }
+            else if( eNewType != OFTInteger )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTString);
             }
         }
         else if( eType == OFTInteger64 )
@@ -624,18 +628,114 @@ void OGRGeoJSONReaderAddOrUpdateField(
                 GeoJSONPropertyToFieldType( poVal, eSubType, bArrayAsString );
             if( eNewType == OFTReal || eNewType == OFTString )
             {
-                poFDefn->SetType(eNewType);
                 poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(eNewType);
+            }
+            else if( eNewType == OFTIntegerList ||
+                     eNewType == OFTInteger64List )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTInteger64List);
+            }
+            else if( eNewType == OFTRealList || eNewType == OFTStringList )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(eNewType);
+            }
+            else if( eNewType != OFTInteger && eNewType != OFTInteger64 )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTString);
             }
         }
-        else if( eType == OFTIntegerList || eType == OFTInteger64List )
+        else if( eType == OFTReal )
+        {
+            OGRFieldSubType eSubType;
+            const OGRFieldType eNewType =
+                GeoJSONPropertyToFieldType( poVal, eSubType, bArrayAsString );
+            if(  eNewType == OFTIntegerList ||
+                 eNewType == OFTInteger64List || eNewType == OFTRealList )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTRealList);
+            }
+            else if( eNewType == OFTStringList )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTStringList);
+            }
+            else if( eNewType != OFTInteger && eNewType != OFTInteger64 &&
+                     eNewType != OFTReal )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTString);
+            }
+        }
+        else if( eType == OFTString )
+        {
+            OGRFieldSubType eSubType;
+            const OGRFieldType eNewType =
+                GeoJSONPropertyToFieldType( poVal, eSubType, bArrayAsString );
+            if( eNewType == OFTStringList )
+                poFDefn->SetType(OFTStringList);
+        }
+        else if( eType == OFTIntegerList )
         {
             OGRFieldSubType eSubType;
             OGRFieldType eNewType =
                 GeoJSONPropertyToFieldType( poVal, eSubType, bArrayAsString );
             if( eNewType == OFTInteger64List || eNewType == OFTRealList ||
                 eNewType == OFTStringList )
+            {
+                poFDefn->SetSubType(OFSTNone);
                 poFDefn->SetType(eNewType);
+            }
+            else if( eNewType == OFTInteger64 )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTInteger64List);
+            }
+            else if( eNewType == OFTReal )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTRealList);
+            }
+            else if( eNewType == OFTInteger || eNewType == OFTIntegerList )
+            {
+                if( poFDefn->GetSubType() == OFSTBoolean &&
+                    eSubType != OFSTBoolean )
+                {
+                    poFDefn->SetSubType(OFSTNone);
+                }
+            }
+            else if( eNewType != OFTInteger )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTString);
+            }
+        }
+        else if( eType == OFTInteger64List )
+        {
+            OGRFieldSubType eSubType;
+            OGRFieldType eNewType =
+                GeoJSONPropertyToFieldType( poVal, eSubType, bArrayAsString );
+            if( eNewType == OFTInteger64List || eNewType == OFTRealList ||
+                eNewType == OFTStringList )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(eNewType);
+            }
+            else if( eNewType == OFTReal )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTRealList);
+            }
+            else if( eNewType != OFTInteger && eNewType != OFTInteger64 &&
+                     eNewType != OFTIntegerList )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTString);
+            }
         }
         else if( eType == OFTRealList )
         {
@@ -643,7 +743,17 @@ void OGRGeoJSONReaderAddOrUpdateField(
             const OGRFieldType eNewType =
                 GeoJSONPropertyToFieldType( poVal, eSubType, bArrayAsString );
             if( eNewType == OFTStringList )
+            {
+                poFDefn->SetSubType(OFSTNone);
                 poFDefn->SetType(eNewType);
+            }
+            else if( eNewType != OFTInteger && eNewType != OFTInteger64 &&
+                     eNewType != OFTReal && eNewType != OFTIntegerList &&
+                     eNewType != OFTInteger64List && eNewType != OFTRealList )
+            {
+                poFDefn->SetSubType(OFSTNone);
+                poFDefn->SetType(OFTString);
+            }
         }
         else if( eType == OFTDate || eType == OFTTime || eType == OFTDateTime )
         {
@@ -654,6 +764,7 @@ void OGRGeoJSONReaderAddOrUpdateField(
                 eNewType = GeoJSONStringPropertyToFieldType( poVal );
             if( eType != eNewType )
             {
+                poFDefn->SetSubType(OFSTNone);
                 if( eType == OFTDate && eNewType == OFTDateTime )
                 {
                     poFDefn->SetType(OFTDateTime);
@@ -664,6 +775,8 @@ void OGRGeoJSONReaderAddOrUpdateField(
                 }
             }
         }
+
+        poFDefn->SetWidth( poFDefn->GetSubType() == OFSTBoolean ? 1 : 0 );
     }
 }
 
@@ -831,8 +944,11 @@ bool OGRGeoJSONReader::GenerateFeatureDefn( OGRGeoJSONLayer* poLayer,
                 int nFldIndex = poDefn->GetFieldIndex( it.key );
                 if( -1 == nFldIndex )
                 {
-                    OGRFieldDefn fldDefn( it.key, OFTString );
-                    poDefn->AddFieldDefn( &fldDefn );
+                    OGRGeoJSONReaderAddOrUpdateField(poDefn, it.key, it.val,
+                                                    bFlattenNestedAttributes_,
+                                                    chNestedAttributeSeparator_,
+                                                    bArrayAsString_,
+                                                    aoSetUndeterminedTypeFields_);
                 }
             }
         }
@@ -978,7 +1094,7 @@ void OGRGeoJSONReaderSetField( OGRLayer* poLayer,
 
     if( poVal == NULL)
     {
-        // Nothing to do.
+        poFeature->SetFieldNull( nField );
     }
     else if( OFTInteger == eType )
     {
@@ -1003,7 +1119,8 @@ void OGRGeoJSONReaderSetField( OGRLayer* poLayer,
     }
     else if( OFTIntegerList == eType )
     {
-        if( json_object_get_type(poVal) == json_type_array )
+        const enum json_type eJSonType(json_object_get_type(poVal));
+        if( eJSonType == json_type_array )
         {
             const int nLength = json_object_array_length(poVal);
             int* panVal = static_cast<int *>(CPLMalloc(sizeof(int) * nLength));
@@ -1015,10 +1132,16 @@ void OGRGeoJSONReaderSetField( OGRLayer* poLayer,
             poFeature->SetField( nField, nLength, panVal );
             CPLFree(panVal);
         }
+        else if ( eJSonType == json_type_boolean ||
+                  eJSonType == json_type_int )
+        {
+            poFeature->SetField( nField, json_object_get_int(poVal) );
+        }
     }
     else if( OFTInteger64List == eType )
     {
-        if( json_object_get_type(poVal) == json_type_array )
+        const enum json_type eJSonType(json_object_get_type(poVal));
+        if( eJSonType == json_type_array )
         {
             const int nLength = json_object_array_length(poVal);
             GIntBig* panVal =
@@ -1031,10 +1154,17 @@ void OGRGeoJSONReaderSetField( OGRLayer* poLayer,
             poFeature->SetField( nField, nLength, panVal );
             CPLFree(panVal);
         }
+        else if ( eJSonType == json_type_boolean ||
+                  eJSonType == json_type_int )
+        {
+            poFeature->SetField( nField,
+                        static_cast<GIntBig>(json_object_get_int64(poVal)));
+        }
     }
     else if( OFTRealList == eType )
     {
-        if( json_object_get_type(poVal) == json_type_array )
+        const enum json_type eJSonType(json_object_get_type(poVal));
+        if( eJSonType == json_type_array )
         {
             const int nLength = json_object_array_length(poVal);
             double* padfVal =
@@ -1047,10 +1177,16 @@ void OGRGeoJSONReaderSetField( OGRLayer* poLayer,
             poFeature->SetField( nField, nLength, padfVal );
             CPLFree(padfVal);
         }
+        else if ( eJSonType == json_type_boolean ||
+                  eJSonType == json_type_int || eJSonType == json_type_double )
+        {
+            poFeature->SetField( nField, json_object_get_double(poVal) );
+        }
     }
     else if( OFTStringList == eType )
     {
-        if( json_object_get_type(poVal) == json_type_array )
+        const enum json_type eJSonType(json_object_get_type(poVal));
+        if( eJSonType == json_type_array )
         {
             const int nLength = json_object_array_length(poVal);
             char** papszVal = (char**)CPLMalloc(sizeof(char*) * (nLength+1));
@@ -1066,6 +1202,10 @@ void OGRGeoJSONReaderSetField( OGRLayer* poLayer,
             papszVal[i] = NULL;
             poFeature->SetField( nField, papszVal );
             CSLDestroy(papszVal);
+        }
+        else
+        {
+            poFeature->SetField( nField, json_object_get_string(poVal) );
         }
     }
     else
@@ -1146,7 +1286,10 @@ OGRFeature* OGRGeoJSONReader::ReadFeature( OGRGeoJSONLayer* poLayer,
             const int nFldIndex = poFeature->GetFieldIndex(it.key);
             if( nFldIndex >= 0 )
             {
-                poFeature->SetField(nFldIndex, json_object_get_string(it.val) );
+                if( it.val )
+                    poFeature->SetField(nFldIndex, json_object_get_string(it.val) );
+                else
+                    poFeature->SetFieldNull(nFldIndex );
             }
         }
     }
@@ -1298,7 +1441,7 @@ OGRGeoJSONReader::ReadFeatureCollection( OGRGeoJSONLayer* poLayer,
 /*                           OGRGeoJSONFindMemberByName                 */
 /************************************************************************/
 
-json_object* OGRGeoJSONFindMemberByName( json_object* poObj,
+lh_entry* OGRGeoJSONFindMemberEntryByName( json_object* poObj,
                                          const char* pszName )
 {
     if( NULL == pszName || NULL == poObj)
@@ -1319,12 +1462,21 @@ json_object* OGRGeoJSONFindMemberByName( json_object* poObj,
             it.key = (char*)it.entry->k;
             it.val = (json_object*)it.entry->v;
             if( EQUAL( it.key, pszName ) )
-                return it.val;
+                return it.entry;
             it.entry = it.entry->next;
         }
     }
 
     return NULL;
+}
+
+json_object* OGRGeoJSONFindMemberByName( json_object* poObj,
+                                         const char* pszName )
+{
+    lh_entry* entry = OGRGeoJSONFindMemberEntryByName( poObj, pszName );
+    if ( NULL == entry )
+        return NULL;
+    return (json_object*)entry->v;
 }
 
 /************************************************************************/
@@ -1393,18 +1545,59 @@ OGRGeometry* OGRGeoJSONReadGeometry( json_object* poObj )
                   "Feature gets NULL geometry assigned." );
     }
     // If we have a crs object in the current object, let's try and set it too.
-
-    json_object* poObjSrs = OGRGeoJSONFindMemberByName( poObj, "crs" );
-    if( poGeometry != NULL && poObjSrs != NULL )
+    if( poGeometry != NULL )
     {
-        OGRSpatialReference* poSRS = OGRGeoJSONReadSpatialReference(poObj);
-        if( poSRS != NULL )
-        {
-            poGeometry->assignSpatialReference(poSRS);
-            poSRS->Release();
+        lh_entry* entry = OGRGeoJSONFindMemberEntryByName( poObj, "crs" );
+        if (entry != NULL ) {
+            json_object* poObjSrs = (json_object*)entry->v;
+            if( poObjSrs != NULL )
+            {
+                OGRSpatialReference* poSRS = OGRGeoJSONReadSpatialReference(poObj);
+                if( poSRS != NULL )
+                {
+                    poGeometry->assignSpatialReference(poSRS);
+                    poSRS->Release();
+                }
+            }
         }
+        else
+            // Assign WGS84 if no CRS defined on geometry.
+            poGeometry->assignSpatialReference(OGRSpatialReference::GetWGS84SRS());
     }
     return poGeometry;
+}
+
+/************************************************************************/
+/*                        OGRGeoJSONGetCoordinate()                     */
+/************************************************************************/
+
+static double OGRGeoJSONGetCoordinate( json_object* poObj,
+                                       const char* pszCoordName,
+                                       int nIndex,
+                                       bool& bValid )
+{
+    json_object* poObjCoord = json_object_array_get_idx( poObj, nIndex );
+    if( NULL == poObjCoord )
+    {
+        CPLDebug( "GeoJSON", "Point: got null object for %s.", pszCoordName );
+        bValid = false;
+        return 0.0;
+    }
+
+    const int iType = json_object_get_type(poObjCoord);
+    if( json_type_double != iType && json_type_int != iType )
+    {
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "Invalid '%s' coordinate. "
+            "Type is not double or integer for \'%s\'.",
+            pszCoordName,
+            json_object_to_json_string(poObjCoord) );
+        bValid = false;
+        return 0.0;
+    }
+
+    return json_object_get_double( poObjCoord );
 }
 
 /************************************************************************/
@@ -1427,84 +1620,25 @@ bool OGRGeoJSONReadRawPoint( json_object* poObj, OGRPoint& point )
             return false;
         }
 
-        // Read X coordinate.
-        json_object* poObjCoord = json_object_array_get_idx( poObj, 0 );
-        if( poObjCoord == NULL )
-        {
-            CPLDebug( "GeoJSON", "Point: got null object." );
-            return false;
-        }
-
-        int iType = json_object_get_type(poObjCoord);
-        if( json_type_double != iType && json_type_int != iType )
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Invalid X coordinate. "
-                     "Type is not double or integer for \'%s\'.",
-                     json_object_to_json_string(poObj) );
-            return false;
-        }
-
-        if( iType == json_type_double )
-            point.setX(json_object_get_double( poObjCoord ));
-        else
-            point.setX(json_object_get_int( poObjCoord ));
-
-        // Read Y coordinate.
-        poObjCoord = json_object_array_get_idx( poObj, 1 );
-        if( poObjCoord == NULL )
-        {
-            CPLDebug( "GeoJSON", "Point: got null object." );
-            return false;
-        }
-
-        iType = json_object_get_type(poObjCoord);
-        if( json_type_double != iType && json_type_int != iType )
-        {
-            CPLError( CE_Failure, CPLE_AppDefined,
-                      "Invalid Y coordinate. "
-                      "Type is not double or integer for \'%s\'.",
-                      json_object_to_json_string(poObj) );
-            return false;
-        }
-
-        if( iType == json_type_double )
-            point.setY(json_object_get_double( poObjCoord ));
-        else
-            point.setY(json_object_get_int( poObjCoord ));
+        bool bValid = true;
+        const double dfX = OGRGeoJSONGetCoordinate(poObj, "x", 0, bValid);
+        const double dfY = OGRGeoJSONGetCoordinate(poObj, "y", 1, bValid);
+        point.setX(dfX);
+        point.setY(dfY);
 
         // Read Z coordinate.
         if( nSize >= GeoJSONObject::eMaxCoordinateDimension )
         {
             // Don't *expect* mixed-dimension geometries, although the
             // spec doesn't explicitly forbid this.
-            poObjCoord = json_object_array_get_idx( poObj, 2 );
-            if( poObjCoord == NULL )
-            {
-                CPLDebug( "GeoJSON", "Point: got null object." );
-                return false;
-            }
-
-            iType = json_object_get_type(poObjCoord);
-            if( json_type_double != iType && json_type_int != iType )
-            {
-                CPLError( CE_Failure, CPLE_AppDefined,
-                          "Invalid Z coordinate. "
-                          "Type is not double or integer for \'%s\'.",
-                          json_object_to_json_string(poObj) );
-                return false;
-            }
-
-            if( iType == json_type_double )
-                point.setZ(json_object_get_double( poObjCoord ));
-            else
-                point.setZ(json_object_get_int( poObjCoord ));
+            const double dfZ = OGRGeoJSONGetCoordinate(poObj, "z", 2, bValid);
+            point.setZ(dfZ);
         }
         else
         {
             point.flattenTo2D();
         }
-        return true;
+        return bValid;
     }
 
     return false;
@@ -1911,7 +2045,7 @@ OGRGeometryCollection* OGRGeoJSONReadGeometryCollection( json_object* poObj )
 }
 
 /************************************************************************/
-/*                           OGR_G_ExportToJson                         */
+/*                       OGR_G_CreateGeometryFromJson                   */
 /************************************************************************/
 
 /** Create a OGR geometry from a GeoJSON geometry object */
@@ -1928,12 +2062,6 @@ OGRGeometryH OGR_G_CreateGeometryFromJson( const char* pszJson )
         return NULL;
 
     OGRGeometry* poGeometry = OGRGeoJSONReadGeometry( poObj );
-
-    // Assign WGS84 if no CRS defined on geometry.
-    if( poGeometry && poGeometry->getSpatialReference() == NULL )
-    {
-        poGeometry->assignSpatialReference(OGRSpatialReference::GetWGS84SRS());
-    }
 
     // Release JSON tree.
     json_object_put( poObj );
@@ -1982,13 +2110,14 @@ bool OGRJSonParse( const char* pszText, json_object** ppoObj,
     if( ppoObj == NULL )
         return false;
     json_tokener* jstok = json_tokener_new();
-    *ppoObj = json_tokener_parse_ex(jstok, pszText, -1);
+    const int nLen = pszText == NULL ? 0 : static_cast<int>(strlen(pszText));
+    *ppoObj = json_tokener_parse_ex(jstok, pszText, nLen);
     if( jstok->err != json_tokener_success)
     {
         if( bVerboseError )
         {
             CPLError(CE_Failure, CPLE_AppDefined,
-                     "GeoJSON parsing error: %s (at offset %d)",
+                     "JSON parsing error: %s (at offset %d)",
                      json_tokener_error_desc(jstok->err), jstok->char_offset);
         }
 

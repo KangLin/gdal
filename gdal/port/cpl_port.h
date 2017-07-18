@@ -653,10 +653,11 @@ static inline char* CPL_afl_friendly_strstr(const char* haystack, const char* ne
 #  define CPLIsNan(x) _isnan(x)
 #  define CPLIsInf(x) (!_isnan(x) && !_finite(x))
 #  define CPLIsFinite(x) _finite(x)
-#elif defined(__cplusplus) && defined(__MINGW32__) &&  __GNUC__ == 4 && __GNUC_MINOR__ == 2
-/* Hack for compatibility with ancient i586-mingw32msvc toolchain */
+#elif defined(__cplusplus) && defined(HAVE_STD_IS_NAN) && HAVE_STD_IS_NAN
 extern "C++" {
+#ifndef DOXYGEN_SKIP
 #include <cmath>
+#endif
 static inline int CPLIsNan(float f) { return std::isnan(f); }
 static inline int CPLIsNan(double f) { return std::isnan(f); }
 static inline int CPLIsInf(float f) { return std::isinf(f); }
@@ -836,17 +837,23 @@ template<> struct CPLStaticAssert<true>
 /** Byte-swap a 32 bit pointer */
 #define CPL_SWAP32PTR(x) \
 {                                                                           \
-    GUInt32 *_pn32ptr = (GUInt32 *) (x);                                    \
+    GUInt32 _n32;                                                           \
+    void* _lx = x;                                                          \
+    memcpy(&_n32, _lx, 4);                                                  \
     CPL_STATIC_ASSERT_IF_AVAILABLE(sizeof(*(x)) == 1 || sizeof(*(x)) == 4); \
-    *_pn32ptr = CPL_SWAP32(*_pn32ptr);                                      \
+    _n32 = CPL_SWAP32(_n32);                                                \
+    memcpy(_lx, &_n32, 4);                                                  \
 }
 
 /** Byte-swap a 64 bit pointer */
 #define CPL_SWAP64PTR(x) \
 {                                                                           \
-    GUInt64 *_pn64ptr = (GUInt64 *) (x);                                    \
+    GUInt64 _n64;                                                           \
+    void* _lx = x;                                                          \
+    memcpy(&_n64, _lx, 8);                                                    \
     CPL_STATIC_ASSERT_IF_AVAILABLE(sizeof(*(x)) == 1 || sizeof(*(x)) == 8); \
-    *_pn64ptr = CPL_SWAP64(*_pn64ptr);                                      \
+    _n64 = CPL_SWAP64(_n64);                                                \
+    memcpy(_lx, &_n64, 8);                                                    \
 }
 
 #endif
@@ -1235,6 +1242,13 @@ inline bool operator!= (const bool& one, const MSVCPedanticBool& other) { return
 #define VOLATILE_BOOL volatile bool
 
 #endif /* defined(__cplusplus) && defined(DEBUG_BOOL) */
+
+#if __clang_major__ >= 4 || (__clang_major__ == 3 && __clang_minor__ >= 8)
+#define CPL_NOSANITIZE_UNSIGNED_INT_OVERFLOW __attribute__((no_sanitize("unsigned-integer-overflow")))
+#else
+#define CPL_NOSANITIZE_UNSIGNED_INT_OVERFLOW
+#endif
 /*! @endcond */
+
 
 #endif /* ndef CPL_BASE_H_INCLUDED */

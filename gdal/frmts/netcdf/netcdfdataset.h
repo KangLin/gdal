@@ -31,6 +31,8 @@
 #define NETCDFDATASET_H_INCLUDED_
 
 #include <cfloat>
+#include <map>
+#include <vector>
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
@@ -39,6 +41,13 @@
 #include "netcdf.h"
 #include "ogr_spatialref.h"
 #include "ogrsf_frmts.h"
+
+#if defined(DEBUG) || defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION) || defined(ALLOW_FORMAT_DUMPS)
+// Whether to support opening a ncdump file as a file dataset
+// Useful for fuzzing purposes
+#define ENABLE_NCDUMP
+#endif
+
 
 /************************************************************************/
 /* ==================================================================== */
@@ -687,52 +696,52 @@ static const oNetcdfSRS_PT poNetcdfSRS_PT[] = {
 
 class netCDFWriterConfigAttribute
 {
-    public:
-        CPLString m_osName;
-        CPLString m_osType;
-        CPLString m_osValue;
+  public:
+    CPLString m_osName;
+    CPLString m_osType;
+    CPLString m_osValue;
 
-        bool Parse(CPLXMLNode* psNode);
+    bool Parse(CPLXMLNode *psNode);
 };
 
 class netCDFWriterConfigField
 {
-    public:
-        CPLString m_osName;
-        CPLString m_osNetCDFName;
-        CPLString m_osMainDim;
-        std::vector<netCDFWriterConfigAttribute> m_aoAttributes;
+  public:
+    CPLString m_osName;
+    CPLString m_osNetCDFName;
+    CPLString m_osMainDim;
+    std::vector<netCDFWriterConfigAttribute> m_aoAttributes;
 
-        bool Parse(CPLXMLNode* psNode);
+    bool Parse(CPLXMLNode *psNode);
 };
 
 class netCDFWriterConfigLayer
 {
-    public:
-        CPLString m_osName;
-        CPLString m_osNetCDFName;
-        std::map<CPLString, CPLString> m_oLayerCreationOptions;
-        std::vector<netCDFWriterConfigAttribute> m_aoAttributes;
-        std::map<CPLString, netCDFWriterConfigField> m_oFields;
+  public:
+    CPLString m_osName;
+    CPLString m_osNetCDFName;
+    std::map<CPLString, CPLString> m_oLayerCreationOptions;
+    std::vector<netCDFWriterConfigAttribute> m_aoAttributes;
+    std::map<CPLString, netCDFWriterConfigField> m_oFields;
 
-        bool Parse(CPLXMLNode* psNode);
+    bool Parse(CPLXMLNode *psNode);
 };
 
 class netCDFWriterConfiguration
 {
-    public:
-        bool m_bIsValid;
-        std::map<CPLString, CPLString> m_oDatasetCreationOptions;
-        std::map<CPLString, CPLString> m_oLayerCreationOptions;
-        std::vector<netCDFWriterConfigAttribute> m_aoAttributes;
-        std::map<CPLString, netCDFWriterConfigField> m_oFields;
-        std::map<CPLString, netCDFWriterConfigLayer> m_oLayers;
+  public:
+    bool m_bIsValid;
+    std::map<CPLString, CPLString> m_oDatasetCreationOptions;
+    std::map<CPLString, CPLString> m_oLayerCreationOptions;
+    std::vector<netCDFWriterConfigAttribute> m_aoAttributes;
+    std::map<CPLString, netCDFWriterConfigField> m_oFields;
+    std::map<CPLString, netCDFWriterConfigLayer> m_oLayers;
 
-        netCDFWriterConfiguration() : m_bIsValid(false) {}
+    netCDFWriterConfiguration() : m_bIsValid(false) {}
 
-        bool Parse(const char* pszFilename);
-        static bool SetNameValue(CPLXMLNode* psNode,
-                                 std::map<CPLString,CPLString>& oMap);
+    bool Parse(const char *pszFilename);
+    static bool SetNameValue(CPLXMLNode *psNode,
+                             std::map<CPLString, CPLString> &oMap);
 };
 
 /************************************************************************/
@@ -758,6 +767,9 @@ class netCDFDataset : public GDALPamDataset
 
     /* basic dataset vars */
     CPLString     osFilename;
+#ifdef ENABLE_NCDUMP
+    bool          bFileToDestroyAtClosing;
+#endif
     int           cdfid;
     char          **papszSubDatasets;
     char          **papszMetadata;

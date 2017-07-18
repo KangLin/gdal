@@ -30,9 +30,10 @@
 #include "cpl_port.h"
 #include "cpl_string.h"
 #include "cpl_time.h"
+#include "ogr_api.h" // for OGR_RawField_xxxxx()
 #include "ogrpgeogeometry.h" /* SHPT_ constants and OGRCreateFromMultiPatchPart() */
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 #define TEST_BIT(ar, bit)                       (ar[(bit) / 8] & (1 << ((bit) % 8)))
 #define BIT_ARRAY_SIZE_IN_BYTES(bitsize)        (((bitsize)+7)/8)
@@ -233,6 +234,13 @@ static int ReadVarUInt(GByte*& pabyIter, GByte* pabyEnd, OutType& nOutVal)
             return TRUE;
         }
         nShift += 7;
+        // To avoid undefined behaviour later when doing << nShift
+        if( nShift >= static_cast<int>(sizeof(OutType)) * 8 )
+        {
+            pabyIter = pabyLocalIter;
+            nOutVal = nVal;
+            returnError();
+        }
     }
 }
 
@@ -487,7 +495,7 @@ int FileGDBTable::GuessFeatureLocations()
             return FALSE;
         int nSize = GetInt32(abyBuffer, 0);
         int nVersion = GetInt32(abyBuffer + 4, 0);
-        if( nSize < 0 && -nSize < 1024 * 1024 &&
+        if( nSize < 0 && nSize > -1024 * 1024 &&
             (nVersion == 3 || nVersion == 4) &&
             IS_VALID_LAYER_GEOM_TYPE(abyBuffer[8]) &&
             abyBuffer[9] == 3 && abyBuffer[10] == 0 && abyBuffer[11] == 0 )
@@ -726,12 +734,13 @@ int FileGDBTable::Open(const char* pszFilename,
 #endif
     }
 
-    nOffsetFieldDesc = GetUInt32(abyHeader + 32, 0);
+    nOffsetFieldDesc = GetUInt32(abyHeader + 32, 0) |
+            (static_cast<GUIntBig>(GetUInt32(abyHeader + 36, 0)) << 32);
 
 #ifdef DEBUG_VERBOSE
     if( nOffsetFieldDesc != 40 )
     {
-        CPLDebug("OpenFileGDB", "%s: nOffsetFieldDesc=%d",
+        CPLDebug("OpenFileGDB", "%s: nOffsetFieldDesc=" CPL_FRMT_GUIB,
                  pszFilename, nOffsetFieldDesc);
     }
 #endif
@@ -838,8 +847,7 @@ int FileGDBTable::Open(const char* pszFilename,
             }
 
             OGRField sDefault;
-            sDefault.Set.nMarker1 = OGRUnsetMarker;
-            sDefault.Set.nMarker2 = OGRUnsetMarker;
+            OGR_RawField_SetUnset(&sDefault);
             if( (flags & 4) != 0 )
             {
                 /* Default value */
@@ -857,11 +865,13 @@ int FileGDBTable::Open(const char* pszFilename,
                     {
                         sDefault.Integer = GetInt16(pabyIter, 0);
                         sDefault.Set.nMarker2 = 0;
+                        sDefault.Set.nMarker3 = 0;
                     }
                     else if( eType == FGFT_INT32 && defaultValueLength == 4 )
                     {
                         sDefault.Integer = GetInt32(pabyIter, 0);
                         sDefault.Set.nMarker2 = 0;
+                        sDefault.Set.nMarker3 = 0;
                     }
                     else if( eType == FGFT_FLOAT32 && defaultValueLength == 4 )
                     {
@@ -1099,13 +1109,14 @@ static void ReadVarIntAndAddNoCheck(GByte*& pabyIter, GIntBig& nOutVal)
 
     b = *pabyIter;
     GUIntBig nVal = (b & 0x3F);
-    int nSign = 1;
-    if( (b & 0x40) != 0 )
-        nSign = -1;
+    bool bNegative = (b & 0x40) != 0;
     if( (b & 0x80) == 0 )
     {
         pabyIter ++;
-        nOutVal += nVal * nSign;
+        if( bNegative )
+            nOutVal -= nVal;
+        else
+            nOutVal += nVal;
         return;
     }
 
@@ -1119,7 +1130,10 @@ static void ReadVarIntAndAddNoCheck(GByte*& pabyIter, GIntBig& nOutVal)
         if( (b64 & 0x80) == 0 )
         {
             pabyIter = pabyLocalIter;
-            nOutVal += nVal * nSign;
+            if( bNegative )
+                nOutVal -= nVal;
+            else
+                nOutVal += nVal;
             return;
         }
         nShift += 7;
@@ -1190,7 +1204,7 @@ vsi_l_offset FileGDBTable::GetOffsetInTableForRow(int iRow)
 #ifdef DEBUG_VERBOSE
     if( iRow == 0 && nOffset != 0 &&
         nOffset != nOffsetHeaderEnd && nOffset != nOffsetHeaderEnd + 4 )
-        CPLDebug("OpenFileGDB", "%s: first feature offset = " CPL_FRMT_GUIB ". Expected %d",
+        CPLDebug("OpenFileGDB", "%s: first feature offset = " CPL_FRMT_GUIB ". Expected " CPL_FRMT_GUIB,
                  osFilename.c_str(), nOffset, nOffsetHeaderEnd);
 #endif
 
@@ -1590,8 +1604,7 @@ const OGRField* FileGDBTable::GetFieldValue(int iCol)
             /* GInt32 nVal = GetInt32(pabyIterVals, 0); */
 
             /* eCurFieldType = OFTBinary; */
-            sCurField.Set.nMarker1 = OGRUnsetMarker;
-            sCurField.Set.nMarker2 = OGRUnsetMarker;
+            OGR_RawField_SetUnset(&sCurField);
 
             pabyIterVals += sizeof(GInt32);
             /* CPLDebug("OpenFileGDB", "Field %d, row %d: %d", iCol, nCurRow, sCurField.Integer); */
@@ -2007,8 +2020,7 @@ FileGDBField::FileGDBField( FileGDBTable* poParentIn ) :
     nMaxWidth(0),
     poIndex(NULL)
 {
-    sDefault.Set.nMarker1 = OGRUnsetMarker;
-    sDefault.Set.nMarker2 = OGRUnsetMarker;
+    OGR_RawField_SetUnset(&sDefault);
 }
 
 /************************************************************************/
@@ -2018,8 +2030,8 @@ FileGDBField::FileGDBField( FileGDBTable* poParentIn ) :
 FileGDBField::~FileGDBField()
 {
     if( eType == FGFT_STRING &&
-        !(sDefault.Set.nMarker1 == OGRUnsetMarker &&
-          sDefault.Set.nMarker2 == OGRUnsetMarker) )
+        !OGR_RawField_IsUnset(&sDefault) &&
+        !OGR_RawField_IsNull(&sDefault) )
         CPLFree(sDefault.String);
 }
 
@@ -3192,7 +3204,7 @@ static const struct
     { "esriGeometryLine", wkbMultiLineString },
     { "esriGeometryPolyline", wkbMultiLineString },
     { "esriGeometryPolygon", wkbMultiPolygon },
-    { "esriGeometryMultiPatch", wkbMultiPolygon }
+    { "esriGeometryMultiPatch", wkbUnknown }
 };
 
 OGRwkbGeometryType FileGDBOGRGeometryConverter::GetGeometryTypeFromESRI(
@@ -3208,4 +3220,4 @@ OGRwkbGeometryType FileGDBOGRGeometryConverter::GetGeometryTypeFromESRI(
     return wkbUnknown;
 }
 
-}; /* namespace OpenFileGDB */
+} /* namespace OpenFileGDB */

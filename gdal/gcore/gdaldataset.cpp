@@ -71,7 +71,7 @@
 #include "../sqlite/ogrsqliteexecutesql.h"
 #endif
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 CPL_C_START
 GDALAsyncReader *
@@ -1178,6 +1178,50 @@ int CPL_STDCALL GDALDereferenceDataset( GDALDatasetH hDataset )
     VALIDATE_POINTER1(hDataset, "GDALDereferenceDataset", 0);
 
     return static_cast<GDALDataset *>(hDataset)->Dereference();
+}
+
+
+/************************************************************************/
+/*                            ReleaseRef()                              */
+/************************************************************************/
+
+/**
+ * \brief Drop a reference to this object, and destroy if no longer referenced.
+ * @return TRUE if the object has been destroyed.
+ * @since GDAL 2.2
+ */
+
+int GDALDataset::ReleaseRef()
+
+{
+    CPLAssert( NULL != this );
+
+    if( Dereference() <= 0 )
+    {
+        nRefCount = 1;
+        delete this;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/************************************************************************/
+/*                        GDALReleaseDataset()                          */
+/************************************************************************/
+
+/**
+ * \brief Drop a reference to this object, and destroy if no longer referenced.
+ *
+ * @see GDALDataset::ReleaseRef()
+ * @since GDAL 2.2
+ */
+
+int CPL_STDCALL GDALReleaseDataset( GDALDatasetH hDataset )
+
+{
+    VALIDATE_POINTER1(hDataset, "GDALReleaseDataset", 0);
+
+    return static_cast<GDALDataset *>(hDataset)->ReleaseRef();
 }
 
 /************************************************************************/
@@ -2767,6 +2811,11 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char *pszFilename,
             GDALValidateOpenOptions(poDriver, papszOptionsToValidate);
         }
 
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+        const bool bFpAvailableBefore = oOpenInfo.fpL != NULL;
+        CPLErrorReset();
+#endif
+
         GDALDataset *poDS = NULL;
         if ( poDriver->pfnOpen != NULL )
         {
@@ -2859,8 +2908,10 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char *pszFilename,
                 const bool bThisLevelOnly =
                     osVal.ifind("only") != std::string::npos;
                 GDALDataset *poOvrDS = GDALCreateOverviewDataset(
-                    poDS, nOvrLevel, bThisLevelOnly, TRUE);
-                if( poOvrDS == NULL )
+                    poDS, nOvrLevel, bThisLevelOnly);
+                poDS->ReleaseRef();
+                poDS = poOvrDS;
+                if( poDS == NULL )
                 {
                     if( nOpenFlags & GDAL_OF_VERBOSE_ERROR )
                     {
@@ -2868,12 +2919,6 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char *pszFilename,
                                  "Cannot open overview level %d of %s",
                                  nOvrLevel, pszFilename);
                     }
-                    GDALClose(poDS);
-                    poDS = NULL;
-                }
-                else
-                {
-                    poDS = poOvrDS;
                 }
             }
             VSIErrorReset();
@@ -2882,6 +2927,16 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char *pszFilename,
             return poDS;
         }
 
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+        if( bFpAvailableBefore && oOpenInfo.fpL == NULL )
+        {
+            // In case the file descriptor was "consumed" by a driver
+            // that ultimately failed, re-open it for next drivers.
+            oOpenInfo.fpL = VSIFOpenL(
+                pszFilename,
+                (oOpenInfo.eAccess == GA_Update) ? "r+b" : "rb");
+        }
+#else
         if( CPLGetLastErrorNo() != 0 && CPLGetLastErrorType() > CE_Warning)
         {
             int *pnRecCount =
@@ -2892,6 +2947,7 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char *pszFilename,
             CSLDestroy(papszOpenOptionsCleaned);
             return NULL;
         }
+#endif
     }
 
     CSLDestroy(papszOpenOptionsCleaned);
@@ -3406,7 +3462,7 @@ void GDALDataset::ReportError(CPLErr eErrClass, CPLErrorNum err_no,
     const char *pszDSName = GetDescription();
     if (strlen(fmt) + strlen(pszDSName) + 3 >= sizeof(szNewFmt) - 1)
         pszDSName = CPLGetFilename(pszDSName);
-    if (pszDSName[0] != '\0' &&
+    if (pszDSName[0] != '\0' && strchr(pszDSName, '%') == NULL &&
         strlen(fmt) + strlen(pszDSName) + 3 < sizeof(szNewFmt) - 1)
     {
         snprintf(szNewFmt, sizeof(szNewFmt), "%s: %s", pszDSName, fmt);
@@ -3713,7 +3769,10 @@ In GDAL 1.X, this method used to be in the OGRDataSource class.
 @param pszName the name for the new layer.  This should ideally not
 match any existing layer on the datasource.
 @param poSpatialRef the coordinate system to use for the new layer, or NULL if
-no coordinate system is available.
+no coordinate system is available.  The driver might only increase
+the reference counter of the object to take ownership, and not make a full copy,
+so do not use OSRDestroySpatialReference(), but OSRRelease() instead when you
+are done with the object.
 @param eGType the geometry type for the layer.  Use wkbUnknown if there
 are no constraints on the types geometry to be written.
 @param papszOptions a StringList of name=value options.  Options are driver
@@ -3797,7 +3856,10 @@ This method is the same as the C++ method GDALDataset::CreateLayer().
 @param pszName the name for the new layer.  This should ideally not
 match any existing layer on the datasource.
 @param hSpatialRef the coordinate system to use for the new layer, or NULL if
-no coordinate system is available.
+no coordinate system is available.  The driver might only increase
+the reference counter of the object to take ownership, and not make a full copy,
+so do not use OSRDestroySpatialReference(), but OSRRelease() instead when you
+are done with the object.
 @param eGType the geometry type for the layer.  Use wkbUnknown if there
 are no constraints on the types geometry to be written.
 @param papszOptions a StringList of name=value options.  Options are driver
@@ -4071,7 +4133,7 @@ This method is the same as the C function OGRReleaseDataSource().
 OGRErr GDALDataset::Release()
 
 {
-    GDALClose(this);
+    ReleaseRef();
     return OGRERR_NONE;
 }
 
@@ -5474,29 +5536,26 @@ GDALDataset::ExecuteSQL( const char *pszStatement,
     if( STARTS_WITH_CI(pszStatement, "ALTER TABLE") )
     {
         char **papszTokens = CSLTokenizeString(pszStatement);
-        if( CSLCount(papszTokens) >= 4 &&
-            EQUAL(papszTokens[3], "ADD") )
+        const int nTokens = CSLCount(papszTokens);
+        if( nTokens >= 4 && EQUAL(papszTokens[3], "ADD") )
         {
             ProcessSQLAlterTableAddColumn(pszStatement);
             CSLDestroy(papszTokens);
             return NULL;
         }
-        else if( CSLCount(papszTokens) >= 4 &&
-                 EQUAL(papszTokens[3], "DROP") )
+        else if( nTokens >= 4 && EQUAL(papszTokens[3], "DROP") )
         {
             ProcessSQLAlterTableDropColumn( pszStatement );
             CSLDestroy(papszTokens);
             return NULL;
         }
-        else if( CSLCount(papszTokens) >= 4 &&
-                 EQUAL(papszTokens[3], "RENAME") )
+        else if( nTokens >= 4 && EQUAL(papszTokens[3], "RENAME") )
         {
             ProcessSQLAlterTableRenameColumn(pszStatement);
             CSLDestroy(papszTokens);
             return NULL;
         }
-        else if( CSLCount(papszTokens) >= 4 &&
-                 EQUAL(papszTokens[3], "ALTER") )
+        else if( nTokens >= 4 && EQUAL(papszTokens[3], "ALTER") )
         {
             ProcessSQLAlterTableAlterColumn(pszStatement);
             CSLDestroy(papszTokens);

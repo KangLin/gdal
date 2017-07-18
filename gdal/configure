@@ -693,8 +693,8 @@ SDE_ENABLED
 IDB_LIB
 IDB_INC
 HAVE_IDB
-DWGDIRECT
-DWG_PLT
+HAVE_TEIGHA
+TEIGHA_DIR
 HAVE_PCRE
 RASTERLITE2_CFLAGS
 HAVE_RASTERLITE2
@@ -1018,7 +1018,8 @@ with_spatialite_soname
 with_sqlite3
 with_rasterlite2
 with_pcre
-with_dwgdirect
+with_teigha
+with_teigha_plt
 with_idb
 with_sde
 with_sde_version
@@ -1054,6 +1055,7 @@ with_jvm_lib_add_rpath
 with_rasdaman
 with_armadillo
 with_cryptopp
+with_mrf
 '
       ac_precious_vars='build_alias
 host_alias
@@ -1799,8 +1801,8 @@ Optional Packages:
                           specify the prefix for sqlite3 library
   --with-rasterlite2=ARG Include RasterLite2 support (ARG=no(default), yes or path)
   --with-pcre             Include libpcre support (REGEXP support for SQLite)
-  --with-dwgdirect=path Include DWG direct support
-  --with-dwg-plt=platform DWGdirect Platform, defaults to lnxX86
+  --with-teigha=path Include Teigha DWG/DGN support
+  --with-teigha-plt=platform Teigha platform
   --with-idb=DIR        Include Informix DataBlade support (DIR points to Informix root)
   --with-sde=DIR        Include ESRI SDE support (DIR is SDE's install dir).
   --with-sde-version=VERSION NUMBER  Set ESRI SDE version number (Default is 80).
@@ -4942,6 +4944,57 @@ if eval test \"x\$"$as_CACHEVAR"\" = x"yes"; then :
 else
   :
 fi
+
+
+
+ac_ext=cpp
+ac_cpp='$CXXCPP $CPPFLAGS'
+ac_compile='$CXX -c $CXXFLAGS $CPPFLAGS conftest.$ac_ext >&5'
+ac_link='$CXX -o conftest$ac_exeext $CXXFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
+ac_compiler_gnu=$ac_cv_cxx_compiler_gnu
+
+as_CACHEVAR=`$as_echo "ax_cv_check_cxxflags_$ERROR_ON_UNKNOWN_OPTIONS_-Wextra-semi" | $as_tr_sh`
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether C++ compiler accepts -Wextra-semi" >&5
+$as_echo_n "checking whether C++ compiler accepts -Wextra-semi... " >&6; }
+if eval \${$as_CACHEVAR+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+
+  ax_check_save_flags=$CXXFLAGS
+  CXXFLAGS="$CXXFLAGS $ERROR_ON_UNKNOWN_OPTIONS -Wextra-semi"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_cxx_try_compile "$LINENO"; then :
+  eval "$as_CACHEVAR=yes"
+else
+  eval "$as_CACHEVAR=no"
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+  CXXFLAGS=$ax_check_save_flags
+fi
+eval ac_res=\$$as_CACHEVAR
+	       { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_res" >&5
+$as_echo "$ac_res" >&6; }
+if eval test \"x\$"$as_CACHEVAR"\" = x"yes"; then :
+  CXX_WFLAGS="$CXX_WFLAGS -Wextra-semi"
+else
+  :
+fi
+
+ac_ext=c
+ac_cpp='$CPP $CPPFLAGS'
+ac_compile='$CC -c $CFLAGS $CPPFLAGS conftest.$ac_ext >&5'
+ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
+ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
 as_CACHEVAR=`$as_echo "ax_cv_check_cflags_$ERROR_ON_UNKNOWN_OPTIONS_-Wno-sign-compare" | $as_tr_sh`
@@ -17952,6 +18005,50 @@ if test "x$CXX" = x ; then
   as_fn_error $? "\"You don't have a working C++ compiler.\"" "$LINENO" 5
 fi
 
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for std::isnan" >&5
+$as_echo_n "checking for std::isnan... " >&6; }
+ac_ext=cpp
+ac_cpp='$CXXCPP $CPPFLAGS'
+ac_compile='$CXX -c $CXXFLAGS $CPPFLAGS conftest.$ac_ext >&5'
+ac_link='$CXX -o conftest$ac_exeext $CXXFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
+ac_compiler_gnu=$ac_cv_cxx_compiler_gnu
+
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <cmath>
+    int CPLIsNan(float f) { return std::isnan(f); }
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_cxx_try_compile "$LINENO"; then :
+
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+
+cat >>confdefs.h <<_ACEOF
+#define HAVE_STD_IS_NAN 1
+_ACEOF
+
+
+else
+
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+ac_ext=c
+ac_cpp='$CPP $CPPFLAGS'
+ac_compile='$CC -c $CFLAGS $CPPFLAGS conftest.$ac_ext >&5'
+ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
+ac_compiler_gnu=$ac_cv_c_compiler_gnu
+
+
 
 # Check whether --with-libtool was given.
 if test "${with_libtool+set}" = set; then :
@@ -18712,7 +18809,7 @@ $as_echo "#define AC_APPLE_UNIVERSAL_BUILD 1" >>confdefs.h
 $as_echo_n "checking for 64bit integer type... " >&6; }
 
   echo 'int main() { long long off=0; }' >> conftest.c
-  if test -z "`${CC} -o conftest conftest.c 2>&1`" ; then
+  if test -z "`${CC} ${CCFLAGS} -o conftest conftest.c 2>&1`" ; then
 
 $as_echo "#define HAVE_LONG_LONG 1" >>confdefs.h
 
@@ -18744,7 +18841,7 @@ $as_echo_n "checking for 64bit file io... " >&6; }
     echo '#include <sys/types.h>' >> conftest.c
     echo '#include <sys/stat.h>' >> conftest.c
     echo 'int main() { struct __stat64 buf; _stat64( "", &buf ); return 0; }' >> conftest.c
-    if test -z "`${CC} -o conftest conftest.c 2>&1`" ; then
+    if test -z "`${CC} ${CCFLAGS} -o conftest conftest.c 2>&1`" ; then
         with_unix_stdio_64=no
 
 cat >>confdefs.h <<_ACEOF
@@ -18766,9 +18863,9 @@ _ACEOF
   fi
 
   if test x"$with_unix_stdio_64" = x"" ; then
-    echo '#include <stdio.h>' > conftest.cpp
+    echo '#include <stdio.h>' > conftest.c
     echo 'int main() { long long off=0; fseek64(NULL, off, SEEK_SET); off = ftell64(NULL); return 0; }' >> conftest.c
-    if test -z "`${CC} -o conftest conftest.c 2>&1`" ; then
+    if test -z "`${CC} ${CCFLAGS} -o conftest conftest.c 2>&1`" ; then
       with_unix_stdio_64=yes
       VSI_FTELL64=ftell64
       VSI_FSEEK64=fseek64
@@ -18778,9 +18875,9 @@ _ACEOF
 
 
   if test x"$with_unix_stdio_64" = x"" ; then
-    echo '#include <stdio.h>' > conftest.c
-    echo 'int main() { long long off=0; fseeko64(NULL, off, SEEK_SET); off = ftello64(NULL); return 0; }' >> conftest.c
-    if test -z "`${CXX} -o conftest conftest.c 2>&1`" ; then
+    echo '#include <stdio.h>' > conftest.cpp
+    echo 'int main() { long long off=0; fseeko64(NULL, off, SEEK_SET); off = ftello64(NULL); return 0; }' >> conftest.cpp
+    if test -z "`${CXX} ${CXXFLAGS} -o conftest conftest.cpp 2>&1`" ; then
       with_unix_stdio_64=yes
       VSI_FTELL64=ftello64
       VSI_FSEEK64=fseeko64
@@ -18790,10 +18887,10 @@ _ACEOF
 
 
   if test x"$with_unix_stdio_64" = x"" ; then
-    echo '#define _LARGEFILE64_SOURCE' > conftest.c
-    echo '#include <stdio.h>' >> conftest.c
-    echo 'int main() { long long off=0; fseeko64(NULL, off, SEEK_SET); off = ftello64(NULL); return 0; }' >> conftest.c
-    if test -z "`${CXX} -o conftest conftest.c 2>&1`" ; then
+    echo '#define _LARGEFILE64_SOURCE' > conftest.cpp
+    echo '#include <stdio.h>' >> conftest.cpp
+    echo 'int main() { long long off=0; fseeko64(NULL, off, SEEK_SET); off = ftello64(NULL); return 0; }' >> conftest.cpp
+    if test -z "`${CXX} ${CXXFLAGS} -o conftest conftest.cpp 2>&1`" ; then
       with_unix_stdio_64=yes
       VSI_FTELL64=ftello64
       VSI_FSEEK64=fseeko64
@@ -18819,7 +18916,7 @@ $as_echo "#define VSI_NEED_LARGEFILE64_SOURCE 1" >>confdefs.h
   if test x"$with_unix_stdio_64" = x"" ; then
     echo '#include <stdio.h>' > conftest.c
     echo 'int main() { fpos_t off=0; fseeko(NULL, off, SEEK_SET); off = ftello(NULL); return 0; }' >> conftest.c
-    if test -z "`${CC} -o conftest conftest.c 2>&1`" ; then
+    if test -z "`${CC} ${CCFLAGS} -o conftest conftest.c 2>&1`" ; then
       with_unix_stdio_64=yes
       VSI_FTELL64=ftello
       VSI_FSEEK64=fseeko
@@ -19882,6 +19979,10 @@ $as_echo_n "checking whether we should hide internal symbols... " >&6; }
 $as_echo "yes" >&6; }
         CFLAGS="$CFLAGS -fvisibility=hidden"
         CXXFLAGS="$CXXFLAGS -fvisibility=hidden"
+        CFLAGS_NOFTRAPV="$CFLAGS_NOFTRAPV -fvisibility=hidden"
+        CXXFLAGS_NOFTRAPV="$CXXFLAGS_NOFTRAPV -fvisibility=hidden"
+        CXXFLAGS_NO_LTO_IF_AVX_NONDEFAULT="$CXXFLAGS_NO_LTO_IF_AVX_NONDEFAULT -fvisibility=hidden"
+        CXXFLAGS_NO_LTO_IF_SSSE3_NONDEFAULT="$CXXFLAGS_NO_LTO_IF_SSSE3_NONDEFAULT -fvisibility=hidden"
     else
         { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
@@ -25265,6 +25366,7 @@ fi
 
 
 FGDB_ENABLED=no
+FGDB_LIB=
 
 if test "$with_fgdb" = "no" ; then
 
@@ -25322,6 +25424,51 @@ $as_echo "found." >&6; }
   else
     as_fn_error $? "not found." "$LINENO" 5
   fi
+
+fi
+
+if test "$FGDB_LIB" != ""; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for pj_datums in -lFileGDBAPI" >&5
+$as_echo_n "checking for pj_datums in -lFileGDBAPI... " >&6; }
+if ${ac_cv_lib_FileGDBAPI_pj_datums+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lFileGDBAPI $FGDB_LIB $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char pj_datums ();
+int
+main ()
+{
+return pj_datums ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_FileGDBAPI_pj_datums=yes
+else
+  ac_cv_lib_FileGDBAPI_pj_datums=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_FileGDBAPI_pj_datums" >&5
+$as_echo "$ac_cv_lib_FileGDBAPI_pj_datums" >&6; }
+if test "x$ac_cv_lib_FileGDBAPI_pj_datums" = xyes; then :
+  FGDB_HAS_PROJ4=yes
+else
+  FGDB_HAS_PROJ4=no
+fi
 
 fi
 
@@ -28391,7 +28538,7 @@ $as_echo "libdap $LIBDAP_VER" >&6; }
                         rm -f islibdappost310.*
         echo '#include "Connect.h"' > islibdappost310.cpp
         echo 'int main(int argc, char** argv) { return 0; } ' >> islibdappost310.cpp
-        if test -z "`${CXX} islibdappost310.cpp -c ${DODS_INC} ${CPPFLAGS} 2>&1`" ; then
+        if test -z "`${CXX} ${CXXFLAGS} islibdappost310.cpp -c ${DODS_INC} ${CPPFLAGS} 2>&1`" ; then
                     DODS_INC="$DODS_INC -DLIBDAP_310 -DLIBDAP_39"
             { $as_echo "$as_me:${as_lineno-$LINENO}: result: libdap >= 3.10" >&5
 $as_echo "libdap >= 3.10" >&6; }
@@ -28404,7 +28551,7 @@ $as_echo "libdap < 3.10" >&6; }
             echo '#include "AttrTable.h"' >> islibdappre39.cpp
             echo 'using namespace libdap;' >> islibdappre39.cpp
             echo 'int main(int argc, char** argv) { DAS oDAS; AttrTable& oAttrTable = oDAS; } ' >> islibdappre39.cpp
-            if test -z "`${CXX} islibdappre39.cpp -c ${DODS_INC} 2>&1`" ; then
+            if test -z "`${CXX} ${CXXFLAGS} islibdappre39.cpp -c ${DODS_INC} 2>&1`" ; then
                             { $as_echo "$as_me:${as_lineno-$LINENO}: result: libdap < 3.9" >&5
 $as_echo "libdap < 3.9" >&6; }
             else
@@ -29852,39 +29999,47 @@ fi
 
 
 
-DWGDIRECT=
-DWG_PLT=
+TEIGHA_DIR=
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking Checking for DWGdirect" >&5
-$as_echo_n "checking Checking for DWGdirect... " >&6; }
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking Checking for Teigha" >&5
+$as_echo_n "checking Checking for Teigha... " >&6; }
 
-# Check whether --with-dwgdirect was given.
-if test "${with_dwgdirect+set}" = set; then :
-  withval=$with_dwgdirect;
+# Check whether --with-teigha was given.
+if test "${with_teigha+set}" = set; then :
+  withval=$with_teigha;
 fi
 
 
-if test -z "$with_dwgdirect" -o "$with_dwgdirect" = "no"; then
+if test -z "$with_teigha" -o "$with_teigha" = "no"; then
     { $as_echo "$as_me:${as_lineno-$LINENO}: result: disabled" >&5
 $as_echo "disabled" >&6; }
-    HAVE_DWGDIRECT=no
+    HAVE_TEIGHA=no
 else
     { $as_echo "$as_me:${as_lineno-$LINENO}: result: enabled" >&5
 $as_echo "enabled" >&6; }
 
 
-# Check whether --with-dwgdirect was given.
-if test "${with_dwgdirect+set}" = set; then :
-  withval=$with_dwgdirect;
+# Check whether --with-teigha-plt was given.
+if test "${with_teigha_plt+set}" = set; then :
+  withval=$with_teigha_plt;
 fi
 
-    if test "x$with_dwg_plt" != "x" ; then
-        DWG_PLT=$with_dwg_plt
+    if test "x$with_teigha_plt" != "x" ; then
+        TEIGHA_DIR=$with_teigha
+        HAVE_TEIGHA=yes
+        TEIGHA_PLT=$with_teigha_plt
+        LIBS="${LIBS} ${TEIGHA_DIR}/bin/${TEIGHA_PLT}/TG_Db.tx"
+        LIBS="${LIBS} ${TEIGHA_DIR}/lib/${TEIGHA_PLT}/libTG_ExamplesCommon.a"
+        LIBS="${LIBS} ${TEIGHA_DIR}/lib/${TEIGHA_PLT}/libTD_ExamplesCommon.a"
+        LIBS="${LIBS} ${TEIGHA_DIR}/lib/${TEIGHA_PLT}/libTD_Key.a"
+        LIBS="${LIBS} -L${TEIGHA_DIR}/bin/${TEIGHA_PLT} -lTD_Db"
+        LIBS="${LIBS} -L${TEIGHA_DIR}/bin/${TEIGHA_PLT} -lTD_DbRoot"
+        LIBS="${LIBS} -L${TEIGHA_DIR}/bin/${TEIGHA_PLT} -lTD_Root"
+        LIBS="${LIBS} -L${TEIGHA_DIR}/bin/${TEIGHA_PLT} -lTD_Ge"
+        LIBS="${LIBS} -L${TEIGHA_DIR}/bin/${TEIGHA_PLT} -lTD_Alloc"
     else
-        DWG_PLT=lnxX86
+        as_fn_error $? "--with-teigha-plt not specified" "$LINENO" 5
     fi
-    DWGDIRECT=$with_dwgdirect
-    HAVE_DWGDIRECT=yes
 fi
 
 
@@ -32279,7 +32434,7 @@ fi
         rm -f testpodofo.*
         echo '#include <podofo.h>' > testpodofo.cpp
         echo 'int main(int argc, char** argv) { PoDoFo::PdfError::EnableDebug( 0 ); return 0; } ' >> testpodofo.cpp
-        ${CXX} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${PODOFO_LIB} 2>/dev/null
+        ${CXX} ${CXXFLAGS} ${LDFLAGS} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${PODOFO_LIB} 2>/dev/null
         RETVAL=$?
         if test $RETVAL -eq 0; then
             HAVE_PODOFO=yes
@@ -32319,7 +32474,7 @@ fi
         rm -f testpodofo.*
         echo '#include <podofo.h>' > testpodofo.cpp
         echo 'int main(int argc, char** argv) { PoDoFo::PdfError::EnableDebug( 0 ); return 0; } ' >> testpodofo.cpp
-        ${CXX} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${TEST_PODOFO_LIB} 2>/dev/null
+        ${CXX} ${CXXFLAGS} ${LDFLAGS} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${TEST_PODOFO_LIB} 2>/dev/null
         RETVAL=$?
         if test $RETVAL -eq 0; then
             HAVE_PODOFO=yes
@@ -32883,7 +33038,7 @@ EXTRA_INCLUDES=$EXTRA_INCLUDES
 
 
 case "${host_os}" in
-    cygwin* | mingw32* | pw32*)
+    cygwin* | mingw* | pw32*)
       EXE_EXT=.exe
       SO_EXT=dll
       ;;
@@ -33753,7 +33908,7 @@ elif test "$with_cryptopp" = "yes" -o "$with_cryptopp" = "" ; then
     # Catch issue with clang++ (https://groups.google.com/forum/#!topic/cryptopp-users/DfWHy3bT0KI)
     echo '#include <cryptopp/osrng.h>' >> testcryptopp.cpp
     echo 'int main(int argc, char** argv) { CryptoPP::AES::Encryption oEnc; return 0; } ' >> testcryptopp.cpp
-    ${CXX} ${CXXFLAGS} testcryptopp.cpp -o testcryptopp -lcryptopp 2>/dev/null
+    ${CXX} ${CXXFLAGS} ${LDFLAGS} testcryptopp.cpp -o testcryptopp -lcryptopp 2>/dev/null
     RETVAL=$?
     if test $RETVAL -eq 0; then
         HAVE_CRYPTOPP=yes
@@ -33777,7 +33932,7 @@ $as_echo_n "checking if cryptopp has all cipher methods builtin... " >&6; }
         rm -f testcryptopp.*
         echo '#include <cryptopp/blowfish.h>' > testcryptopp.cpp
         echo 'int main(int argc, char** argv) { CryptoPP::Blowfish::Encryption oEnc; return 0; } ' >> testcryptopp.cpp
-        ${CXX} ${CXXFLAGS} testcryptopp.cpp -o testcryptopp -lcryptopp 2>/dev/null
+        ${CXX} ${CXXFLAGS} ${LDFLAGS} testcryptopp.cpp -o testcryptopp -lcryptopp 2>/dev/null
         RETVAL=$?
         if test $RETVAL -eq 0; then
             USE_ONLY_CRYPTODLL_ALG=no
@@ -33799,7 +33954,7 @@ else
     # Catch issue with clang++ (https://groups.google.com/forum/#!topic/cryptopp-users/DfWHy3bT0KI)
     echo '#include <cryptopp/osrng.h>' >> testcryptopp.cpp
     echo 'int main(int argc, char** argv) { CryptoPP::AES::Encryption oEnc; return 0; } ' >> testcryptopp.cpp
-    ${CXX} ${CXXFLAGS} testcryptopp.cpp -I$with_cryptopp/include -o testcryptopp -L$with_cryptopp/lib -lcryptopp 2>/dev/null
+    ${CXX} ${CXXFLAGS} ${LDFLAGS} testcryptopp.cpp -I$with_cryptopp/include -o testcryptopp -L$with_cryptopp/lib -lcryptopp 2>/dev/null
     RETVAL=$?
     if test $RETVAL -eq 0; then
         HAVE_CRYPTOPP=yes
@@ -33821,7 +33976,7 @@ $as_echo_n "checking if cryptopp has all cipher methods builtin... " >&6; }
         rm -f testcryptopp.*
         echo '#include <cryptopp/blowfish.h>' > testcryptopp.cpp
         echo 'int main(int argc, char** argv) { CryptoPP::Blowfish::Encryption oEnc; return 0; } ' >> testcryptopp.cpp
-        ${CXX} ${CXXFLAGS} testcryptopp.cpp -I$with_cryptopp/include -o testcryptopp -L$with_cryptopp/lib -lcryptopp 2>/dev/null
+        ${CXX} ${CXXFLAGS} ${LDFLAGS} testcryptopp.cpp -I$with_cryptopp/include -o testcryptopp -L$with_cryptopp/lib -lcryptopp 2>/dev/null
         RETVAL=$?
         if test $RETVAL -eq 0; then
             USE_ONLY_CRYPTODLL_ALG=no
@@ -33846,9 +34001,9 @@ USE_ONLY_CRYPTODLL_ALG=$USE_ONLY_CRYPTODLL_ALG
 
 
 
-# Check whether --with-grib was given.
-if test "${with_grib+set}" = set; then :
-  withval=$with_grib;
+# Check whether --with-mrf was given.
+if test "${with_mrf+set}" = set; then :
+  withval=$with_mrf;
 fi
 
 
@@ -36489,7 +36644,7 @@ fi
 echo "  RasterLite2 support:       ${HAVE_RASTERLITE2}"
 
 
-echo "  DWGdirect support          ${HAVE_DWGDIRECT}"
+echo "  Teigha (DWG and DGNv8):    ${HAVE_TEIGHA}"
 
 
 echo "  INFORMIX DataBlade support:${HAVE_IDB}"
@@ -36585,4 +36740,9 @@ fi
 if test "$HAVE_LIBXML2" = "yes" -a "$FGDB_ENABLED" = "yes"; then
     { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: --with-libxml2 and --with-fgdb are both available. There might be some incompatibility between system libxml2 and the embedded copy within libFileGDBAPI" >&5
 $as_echo "$as_me: WARNING: --with-libxml2 and --with-fgdb are both available. There might be some incompatibility between system libxml2 and the embedded copy within libFileGDBAPI" >&2;}
+fi
+
+if test "$PROJ_STATIC" = "no" -a "$FGDB_ENABLED" = "yes" -a "$FGDB_HAS_PROJ4" = "yes"; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: --without-static-proj and --with-fgdb are both available. There might be some incompatibility between system libproj and the embedded copy within libFileGDBAPI" >&5
+$as_echo "$as_me: WARNING: --without-static-proj and --with-fgdb are both available. There might be some incompatibility between system libproj and the embedded copy within libFileGDBAPI" >&2;}
 fi

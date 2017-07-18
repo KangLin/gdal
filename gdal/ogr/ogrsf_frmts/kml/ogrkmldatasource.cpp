@@ -36,7 +36,7 @@
 #include "cpl_string.h"
 #include "cpl_vsi_error.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                         OGRKMLDataSource()                           */
@@ -146,7 +146,12 @@ int OGRKMLDataSource::Open( const char * pszNewName, int bTestOpen )
 /* -------------------------------------------------------------------- */
 /*      Prescan the KML file so we can later work with the structure    */
 /* -------------------------------------------------------------------- */
-    poKMLFile_->parse();
+    if( !poKMLFile_->parse() )
+    {
+        delete poKMLFile_;
+        poKMLFile_ = NULL;
+        return FALSE;
+    }
 
 /* -------------------------------------------------------------------- */
 /*      Classify the nodes                                              */

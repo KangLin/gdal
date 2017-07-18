@@ -56,8 +56,9 @@
 #include "ogr_geometry.h"
 #include "ogr_spatialref.h"
 #include "ogr_srs_api.h"
+#include "vrtdataset.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                        GDALWarpAppOptions                            */
@@ -205,14 +206,17 @@ struct GDALWarpAppOptions
 
     /*! overview level of source files to be used */
     int nOvLevel;
+
+    /*! Whether to disable vertical grid shift adjustment */
+    bool bNoVShiftGrid;
 };
 
 static CPLErr
 LoadCutline( const char *pszCutlineDSName, const char *pszCLayer,
              const char *pszCWHERE, const char *pszCSQL,
-             void **phCutlineRet );
+             OGRGeometryH *phCutlineRet );
 static CPLErr
-TransformCutlineToSource( GDALDatasetH hSrcDS, void *hCutline,
+TransformCutlineToSource( GDALDatasetH hSrcDS, OGRGeometryH hCutline,
                           char ***ppapszWarpOptions, char **papszTO );
 
 static GDALDatasetH
@@ -275,10 +279,10 @@ static double GetAverageSegmentLength(OGRGeometryH hGeom)
 /*                           CropToCutline()                            */
 /************************************************************************/
 
-static CPLErr CropToCutline( void* hCutline, char** papszTO, int nSrcCount, GDALDatasetH *pahSrcDS,
+static CPLErr CropToCutline( OGRGeometryH hCutline, char** papszTO, int nSrcCount, GDALDatasetH *pahSrcDS,
                            double& dfMinX, double& dfMinY, double& dfMaxX, double &dfMaxY )
 {
-    OGRGeometryH hCutlineGeom = OGR_G_Clone( (OGRGeometryH) hCutline );
+    OGRGeometryH hCutlineGeom = OGR_G_Clone( hCutline );
     OGRSpatialReferenceH hCutlineSRS = OGR_G_GetSpatialReference( hCutlineGeom );
     const char *pszThisTargetSRS = CSLFetchNameValue( papszTO, "DST_SRS" );
     const char *pszThisSourceSRS = CSLFetchNameValue(papszTO, "SRC_SRS");
@@ -385,8 +389,7 @@ static CPLErr CropToCutline( void* hCutline, char** papszTO, int nSrcCount, GDAL
 
         for(int nIter=0;nIter<10;nIter++)
         {
-            if( hTransformedGeom != NULL )
-                OGR_G_DestroyGeometry(hTransformedGeom);
+            OGR_G_DestroyGeometry(hTransformedGeom);
             hTransformedGeom = OGR_G_Clone(hGeomInSrcSRS);
             if( hCTSrcToDst != NULL )
                 OGR_G_Transform( hTransformedGeom, hCTSrcToDst );
@@ -404,7 +407,7 @@ static CPLErr CropToCutline( void* hCutline, char** papszTO, int nSrcCount, GDAL
             double dfAverageSegmentLength = GetAverageSegmentLength(hGeomInSrcSRS);
             OGR_G_Segmentize(hGeomInSrcSRS, dfAverageSegmentLength/4);
 
-            memcpy(&sLastEnvelope, &sCurEnvelope, sizeof(OGREnvelope));
+            sLastEnvelope = sCurEnvelope;
         }
 
         OGR_G_DestroyGeometry(hGeomInSrcSRS);
@@ -456,6 +459,227 @@ GDALWarpAppOptions* GDALWarpAppOptionsClone(const GDALWarpAppOptions *psOptionsI
 }
 
 /************************************************************************/
+/*                           Is3DGeogcs()                               */
+/************************************************************************/
+
+static bool Is3DGeogcs( const OGRSpatialReference& oSRS )
+{
+    const char* pszName = oSRS.GetAuthorityName(NULL);
+    const char* pszCode = oSRS.GetAuthorityCode(NULL);
+    // Yep, we only support that EPSG:4979, ie WGS 84 3D
+    return pszName != NULL && EQUAL(pszName, "EPSG") &&
+           pszCode != NULL && EQUAL(pszCode, "4979");
+}
+
+/************************************************************************/
+/*                      ApplyVerticalShiftGrid()                        */
+/************************************************************************/
+
+static GDALDatasetH ApplyVerticalShiftGrid( GDALDatasetH hWrkSrcDS,
+                                            const GDALWarpAppOptions* psOptions,
+                                            GDALDatasetH hVRTDS,
+                                            bool& bErrorOccurredOut )
+{
+    bErrorOccurredOut = false;
+    // Check if we must do vertical shift grid transform
+    double adfGT[6];
+    const char* pszSrcWKT = CSLFetchNameValueDef(
+                                    psOptions->papszTO, "SRC_SRS",
+                                    GDALGetProjectionRef(hWrkSrcDS) );
+    const char* pszDstWKT = CSLFetchNameValue( psOptions->papszTO, "DST_SRS" );
+    if( GDALGetRasterCount(hWrkSrcDS) == 1 &&
+        GDALGetGeoTransform(hWrkSrcDS, adfGT) == CE_None &&
+        pszSrcWKT != NULL && pszSrcWKT[0] != '\0' &&
+        pszDstWKT != NULL )
+    {
+        OGRSpatialReference oSRSSrc;
+        OGRSpatialReference oSRSDst;
+        if( oSRSSrc.SetFromUserInput( pszSrcWKT ) == OGRERR_NONE &&
+            oSRSDst.SetFromUserInput( pszDstWKT ) == OGRERR_NONE &&
+            (oSRSSrc.IsCompound() || Is3DGeogcs(oSRSSrc) ||
+             oSRSDst.IsCompound() || Is3DGeogcs(oSRSDst)) )
+        {
+            const char *pszSrcProj4Geoids =
+                oSRSSrc.GetExtension( "VERT_DATUM", "PROJ4_GRIDS" );
+            const char *pszDstProj4Geoids =
+                oSRSDst.GetExtension( "VERT_DATUM", "PROJ4_GRIDS" );
+
+            if( oSRSSrc.IsCompound() && pszSrcProj4Geoids == NULL )
+            {
+                CPLDebug("GDALWARP", "Source SRS is a compound CRS but lacks "
+                         "+geoidgrids");
+            }
+
+            if( oSRSDst.IsCompound() && pszDstProj4Geoids == NULL )
+            {
+                CPLDebug("GDALWARP", "Target SRS is a compound CRS but lacks "
+                         "+geoidgrids");
+            }
+
+            if( pszSrcProj4Geoids != NULL && pszDstProj4Geoids != NULL &&
+                EQUAL(pszSrcProj4Geoids, pszDstProj4Geoids) )
+            {
+                pszSrcProj4Geoids = NULL;
+                pszDstProj4Geoids = NULL;
+            }
+
+            // Select how to go from input dataset units to meters
+            const char* pszUnit =
+                GDALGetRasterUnitType( GDALGetRasterBand(hWrkSrcDS, 1) );
+            double dfToMeterSrc = 1.0;
+            if( pszUnit && (EQUAL(pszUnit, "m") ||
+                            EQUAL(pszUnit, "meter")||
+                            EQUAL(pszUnit, "metre")) )
+            {
+            }
+            else if( pszUnit && (EQUAL(pszUnit, "ft") ||
+                                 EQUAL(pszUnit, "foot")) )
+            {
+                dfToMeterSrc = CPLAtof(SRS_UL_FOOT_CONV);
+            }
+            else
+            {
+                if( pszUnit && !EQUAL(pszUnit, "") )
+                {
+                    CPLError(CE_Warning, CPLE_AppDefined,
+                             "Unknown units=%s", pszUnit);
+                }
+                if( oSRSSrc.IsCompound() )
+                {
+                    dfToMeterSrc =
+                        oSRSSrc.GetTargetLinearUnits("VERT_CS");
+                }
+                else if( oSRSSrc.IsProjected() )
+                {
+                    dfToMeterSrc = oSRSSrc.GetLinearUnits();
+                }
+            }
+
+            double dfToMeterDst = 1.0;
+            if( oSRSDst.IsCompound() )
+            {
+                dfToMeterDst =
+                    oSRSDst.GetTargetLinearUnits("VERT_CS");
+            }
+            else if( oSRSDst.IsProjected() )
+            {
+                dfToMeterDst = oSRSDst.GetLinearUnits();
+            }
+
+            char** papszOptions = NULL;
+            if( psOptions->eOutputType != GDT_Unknown )
+            {
+                papszOptions = CSLSetNameValue(papszOptions,
+                        "DATATYPE",
+                        GDALGetDataTypeName(psOptions->eOutputType));
+            }
+            papszOptions = CSLSetNameValue(papszOptions,
+                "ERROR_ON_MISSING_VERT_SHIFT",
+                CSLFetchNameValue(psOptions->papszTO,
+                                  "ERROR_ON_MISSING_VERT_SHIFT"));
+            papszOptions = CSLSetNameValue(papszOptions, "SRC_SRS",
+                                           pszSrcWKT);
+
+            if( pszSrcProj4Geoids != NULL )
+            {
+                int bError = FALSE;
+                GDALDatasetH hGridDataset =
+                    GDALOpenVerticalShiftGrid(pszSrcProj4Geoids, &bError);
+                if( bError && hGridDataset == NULL )
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "Cannot open %s.", pszSrcProj4Geoids);
+                    bErrorOccurredOut = true;
+                    CSLDestroy(papszOptions);
+                    return hWrkSrcDS;
+                }
+                else if( hGridDataset != NULL )
+                {
+                    // Transform from source vertical datum to WGS84
+                    GDALDatasetH hTmpDS = GDALApplyVerticalShiftGrid(
+                        hWrkSrcDS, hGridDataset, FALSE,
+                        dfToMeterSrc, 1.0, papszOptions );
+                    GDALReleaseDataset(hGridDataset);
+                    if( hTmpDS == NULL )
+                    {
+                        bErrorOccurredOut = true;
+                        CSLDestroy(papszOptions);
+                        return hWrkSrcDS;
+                    }
+                    else
+                    {
+                        if( hVRTDS )
+                        {
+                            VRTWarpedDataset* poVRTDS =
+                                reinterpret_cast<VRTWarpedDataset*>(hVRTDS);
+                            poVRTDS->SetApplyVerticalShiftGrid(
+                                pszSrcProj4Geoids,
+                                false,
+                                dfToMeterSrc, 1.0, papszOptions );
+                        }
+                        CPLDebug("GDALWARP", "Adjusting source dataset "
+                                 "with source vertical datum using %s",
+                                 pszSrcProj4Geoids);
+                        GDALReleaseDataset(hWrkSrcDS);
+                        hWrkSrcDS = hTmpDS;
+                        dfToMeterSrc = 1.0;
+                    }
+                }
+            }
+
+            if( pszDstProj4Geoids != NULL )
+            {
+                int bError = FALSE;
+                GDALDatasetH hGridDataset =
+                    GDALOpenVerticalShiftGrid(pszDstProj4Geoids, &bError);
+                if( bError && hGridDataset == NULL )
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "Cannot open %s.", pszDstProj4Geoids);
+                    bErrorOccurredOut = true;
+                    CSLDestroy(papszOptions);
+                    return hWrkSrcDS;
+                }
+                else if( hGridDataset != NULL )
+                {
+                    // Transform from WGS84 to target vertical datum
+                    GDALDatasetH hTmpDS = GDALApplyVerticalShiftGrid(
+                        hWrkSrcDS, hGridDataset, TRUE,
+                        dfToMeterSrc, dfToMeterDst, papszOptions );
+                    GDALReleaseDataset(hGridDataset);
+                    if( hTmpDS == NULL )
+                    {
+                        bErrorOccurredOut = true;
+                        CSLDestroy(papszOptions);
+                        return hWrkSrcDS;
+                    }
+                    else
+                    {
+                        if( hVRTDS )
+                        {
+                            VRTWarpedDataset* poVRTDS =
+                                reinterpret_cast<VRTWarpedDataset*>(hVRTDS);
+                            poVRTDS->SetApplyVerticalShiftGrid(
+                                pszDstProj4Geoids,
+                                true,
+                                dfToMeterSrc, dfToMeterDst, papszOptions );
+                        }
+                        CPLDebug("GDALWARP", "Adjusting source dataset "
+                                 "with target vertical datum using %s",
+                                 pszDstProj4Geoids);
+                        GDALReleaseDataset(hWrkSrcDS);
+                        hWrkSrcDS = hTmpDS;
+                    }
+                }
+            }
+
+            CSLDestroy(papszOptions);
+        }
+    }
+    return hWrkSrcDS;
+}
+
+/************************************************************************/
 /*                             GDALWarp()                               */
 /************************************************************************/
 
@@ -474,7 +698,7 @@ GDALWarpAppOptions* GDALWarpAppOptionsClone(const GDALWarpAppOptions *psOptionsI
  * @param pahSrcDS the list of input datasets.
  * @param psOptionsIn the options struct returned by GDALWarpAppOptionsNew() or NULL.
  * @param pbUsageError the pointer to int variable to determine any usage error has occurred.
- * @return the output dataset (new dataset that must be closed using GDALClose(), or hDstDS is not NULL) or NULL in case of error.
+ * @return the output dataset (new dataset that must be closed using GDALClose(), or hDstDS if not NULL) or NULL in case of error.
  *
  * @since GDAL 2.1
  */
@@ -494,16 +718,25 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
     if( pszDest == NULL )
         pszDest = GDALGetDescription(hDstDS);
 
-    int bMustCloseDstDSInCaseOfError = (hDstDS == NULL);
+#ifdef DEBUG
+    GDALDataset* poDstDS = reinterpret_cast<GDALDataset*>(hDstDS);
+    const int nExpectedRefCountAtEnd = ( poDstDS != NULL ) ? poDstDS->GetRefCount() : 1;
+#endif
+    const bool bDropDstDSRef = (hDstDS != NULL);
+    if( hDstDS != NULL )
+        GDALReferenceDataset(hDstDS);
     GDALTransformerFunc pfnTransformer = NULL;
     void *hTransformArg = NULL;
     int bHasGotErr = FALSE;
     int bVRT = FALSE;
-    void *hCutline = NULL;
+    OGRGeometryH hCutline = NULL;
 
     GDALWarpAppOptions* psOptions =
         (psOptionsIn) ? GDALWarpAppOptionsClone(psOptionsIn) :
                         GDALWarpAppOptionsNew(NULL, NULL);
+
+    psOptions->papszTO = CSLSetNameValue(psOptions->papszTO,
+                                         "STRIP_VERT_CS", "YES");
 
     if( EQUAL(psOptions->pszFormat,"VRT") )
     {
@@ -632,8 +865,10 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
     if( psOptions->pszCutlineDSName != NULL )
     {
         CPLErr eError;
-        eError = LoadCutline( psOptions->pszCutlineDSName, psOptions->pszCLayer, psOptions->pszCWHERE, psOptions->pszCSQL,
-                     &hCutline );
+        eError = LoadCutline( psOptions->pszCutlineDSName,
+                              psOptions->pszCLayer,
+                              psOptions->pszCWHERE, psOptions->pszCSQL,
+                              &hCutline );
         if(eError == CE_Failure)
         {
             GDALWarpAppOptionsFree(psOptions);
@@ -649,7 +884,7 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
         if(eError == CE_Failure)
         {
             GDALWarpAppOptionsFree(psOptions);
-            OGR_G_DestroyGeometry( (OGRGeometryH) hCutline );
+            OGR_G_DestroyGeometry( hCutline );
             return NULL;
         }
     }
@@ -691,14 +926,14 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
                                        psOptions);
         if(hDstDS == NULL)
         {
-            if( hUniqueTransformArg )
-                GDALDestroyTransformer( hUniqueTransformArg );
+            GDALDestroyTransformer( hUniqueTransformArg );
             GDALWarpAppOptionsFree(psOptions);
-            if( hCutline != NULL )
-                OGR_G_DestroyGeometry( (OGRGeometryH) hCutline );
+            OGR_G_DestroyGeometry( hCutline );
             return NULL;
         }
-
+#ifdef DEBUG
+        poDstDS = reinterpret_cast<GDALDataset*>(hDstDS);
+#endif
         psOptions->bCreateOutput = TRUE;
 
         if( !bInitDestSetByUser )
@@ -717,12 +952,6 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
 
         CSLDestroy( psOptions->papszCreateOptions );
         psOptions->papszCreateOptions = NULL;
-    }
-
-    if( hDstDS == NULL )
-    {
-        GDALWarpAppOptionsFree(psOptions);
-        return NULL;
     }
 
 /* -------------------------------------------------------------------- */
@@ -756,10 +985,8 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
         if( hSrcDS == NULL )
         {
             GDALWarpAppOptionsFree(psOptions);
-            if( hCutline != NULL )
-                OGR_G_DestroyGeometry( (OGRGeometryH) hCutline );
-            if( bMustCloseDstDSInCaseOfError )
-                GDALClose(hDstDS);
+            OGR_G_DestroyGeometry( hCutline );
+            GDALReleaseDataset(hDstDS);
             return NULL;
         }
 
@@ -770,10 +997,8 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
         {
             CPLError(CE_Failure, CPLE_AppDefined, "Input file %s has no raster bands.", GDALGetDescription(hSrcDS) );
             GDALWarpAppOptionsFree(psOptions);
-            if( hCutline != NULL )
-                OGR_G_DestroyGeometry( (OGRGeometryH) hCutline );
-            if( bMustCloseDstDSInCaseOfError )
-                GDALClose(hDstDS);
+            OGR_G_DestroyGeometry( hCutline );
+            GDALReleaseDataset(hDstDS);
             return NULL;
         }
 
@@ -836,6 +1061,14 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
                 }
 
                 CSLDestroy(papszMetadataNew);
+
+                /* ISIS3 -> ISIS3 special case */
+                if( EQUAL(psOptions->pszFormat, "ISIS3") )
+                {
+                    char** papszMD_ISIS3 = GDALGetMetadata( hSrcDS, "json:ISIS3");
+                    if( papszMD_ISIS3 != NULL)
+                        GDALSetMetadata(hDstDS, papszMD_ISIS3, "json:ISIS3");
+                }
 
                 /* copy band-level metadata and other info */
                 if ( GDALGetRasterCount( hSrcDS ) == GDALGetRasterCount( hDstDS ) )
@@ -936,10 +1169,8 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
         if( hTransformArg == NULL )
         {
             GDALWarpAppOptionsFree(psOptions);
-            if( hCutline != NULL )
-                OGR_G_DestroyGeometry( (OGRGeometryH) hCutline );
-            if( bMustCloseDstDSInCaseOfError )
-                GDALClose(hDstDS);
+            OGR_G_DestroyGeometry( hCutline );
+            GDALReleaseDataset(hDstDS);
             return NULL;
         }
 
@@ -983,14 +1214,14 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
                     {
                         CPLDebug("WARP", "Selecting overview level %d for %s",
                                  iOvr, GDALGetDescription(hSrcDS));
-                        poSrcOvrDS = GDALCreateOverviewDataset( poSrcDS, iOvr, FALSE, FALSE );
+                        poSrcOvrDS = GDALCreateOverviewDataset( poSrcDS, iOvr, FALSE );
                     }
                 }
             }
         }
         else if( psOptions->nOvLevel >= 0 )
         {
-            poSrcOvrDS = GDALCreateOverviewDataset( poSrcDS, psOptions->nOvLevel, TRUE, FALSE );
+            poSrcOvrDS = GDALCreateOverviewDataset( poSrcDS, psOptions->nOvLevel, TRUE );
             if( poSrcOvrDS == NULL )
             {
                 if( !psOptions->bQuiet )
@@ -1000,7 +1231,7 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
                             psOptions->nOvLevel, GDALGetDescription(hSrcDS), nOvCount - 1);
                 }
                 if( nOvCount > 0 )
-                    poSrcOvrDS = GDALCreateOverviewDataset( poSrcDS, nOvCount - 1, FALSE, FALSE );
+                    poSrcOvrDS = GDALCreateOverviewDataset( poSrcDS, nOvCount - 1, FALSE );
             }
             else
             {
@@ -1009,7 +1240,28 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
             }
         }
 
+        if( poSrcOvrDS == NULL )
+            GDALReferenceDataset(hSrcDS);
+
         GDALDatasetH hWrkSrcDS = (poSrcOvrDS) ? (GDALDatasetH)poSrcOvrDS : hSrcDS;
+
+        if( !psOptions->bNoVShiftGrid )
+        {
+            bool bErrorOccurred = false;
+            hWrkSrcDS = ApplyVerticalShiftGrid( hWrkSrcDS,
+                                                psOptions,
+                                                bVRT ? hDstDS : NULL,
+                                                bErrorOccurred );
+            if( bErrorOccurred )
+            {
+                GDALDestroyTransformer( hTransformArg );
+                GDALWarpAppOptionsFree(psOptions);
+                OGR_G_DestroyGeometry( hCutline );
+                GDALReleaseDataset(hWrkSrcDS);
+                GDALReleaseDataset(hDstDS);
+                return NULL;
+            }
+        }
 
         /* We need to recreate the transform when operating on an overview */
         if( poSrcOvrDS != NULL )
@@ -1096,21 +1348,35 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
 
             psWO->padfSrcNoDataReal = (double *)
                 CPLMalloc(psWO->nBandCount*sizeof(double));
-            psWO->padfSrcNoDataImag = (double *)
-                CPLMalloc(psWO->nBandCount*sizeof(double));
+            psWO->padfSrcNoDataImag = NULL;
 
             for( int i = 0; i < psWO->nBandCount; i++ )
             {
                 if( i < nTokenCount )
                 {
-                    CPLStringToComplex( papszTokens[i],
-                                        psWO->padfSrcNoDataReal + i,
-                                        psWO->padfSrcNoDataImag + i );
+                    if( strchr(papszTokens[i], 'i') != NULL)
+                    {
+                        if( psWO->padfSrcNoDataImag == NULL )
+                        {
+                            psWO->padfSrcNoDataImag = (double *)
+                                CPLCalloc(psWO->nBandCount, sizeof(double));
+                        }
+                        CPLStringToComplex( papszTokens[i],
+                                            psWO->padfSrcNoDataReal + i,
+                                            psWO->padfSrcNoDataImag + i );
+                    }
+                    else
+                    {
+                        psWO->padfSrcNoDataReal[i] = CPLAtof(papszTokens[i]);
+                    }
                 }
                 else
                 {
                     psWO->padfSrcNoDataReal[i] = psWO->padfSrcNoDataReal[i-1];
-                    psWO->padfSrcNoDataImag[i] = psWO->padfSrcNoDataImag[i-1];
+                    if( psWO->padfSrcNoDataImag != NULL )
+                    {
+                        psWO->padfSrcNoDataImag[i] = psWO->padfSrcNoDataImag[i-1];
+                    }
                 }
             }
 
@@ -1153,8 +1419,6 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
                 }
                 psWO->padfSrcNoDataReal = (double *)
                     CPLMalloc(psWO->nBandCount*sizeof(double));
-                psWO->padfSrcNoDataImag = (double *)
-                    CPLMalloc(psWO->nBandCount*sizeof(double));
 
                 for( int i = 0; i < psWO->nBandCount; i++ )
                 {
@@ -1165,12 +1429,10 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
                     if( bHaveNodata )
                     {
                         psWO->padfSrcNoDataReal[i] = dfReal;
-                        psWO->padfSrcNoDataImag[i] = 0.0;
                     }
                     else
                     {
                         psWO->padfSrcNoDataReal[i] = -123456.789;
-                        psWO->padfSrcNoDataImag[i] = 0.0;
                     }
                 }
             }
@@ -1280,8 +1542,6 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
             {
                 psWO->padfDstNoDataReal = (double *)
                     CPLMalloc(psWO->nBandCount*sizeof(double));
-                psWO->padfDstNoDataImag = (double *)
-                    CPLCalloc(psWO->nBandCount, sizeof(double));
                 for( int i = 0; i < psWO->nBandCount; i++ )
                 {
                     GDALRasterBandH hBand = GDALGetRasterBand( hDstDS, i+1 );
@@ -1298,8 +1558,12 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
         {
             psWO->padfDstNoDataReal = (double *)
                 CPLMalloc(psWO->nBandCount*sizeof(double));
-            psWO->padfDstNoDataImag = (double *)
-                CPLMalloc(psWO->nBandCount*sizeof(double));
+
+            if( psWO->padfSrcNoDataImag != NULL)
+            {
+                psWO->padfDstNoDataImag = (double *)
+                    CPLMalloc(psWO->nBandCount*sizeof(double));
+            }
 
             if( !psOptions->bQuiet )
                 printf( "Copying nodata values from source %s to destination %s.\n",
@@ -1308,7 +1572,10 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
             for( int i = 0; i < psWO->nBandCount; i++ )
             {
                 psWO->padfDstNoDataReal[i] = psWO->padfSrcNoDataReal[i];
-                psWO->padfDstNoDataImag[i] = psWO->padfSrcNoDataImag[i];
+                if( psWO->padfSrcNoDataImag != NULL)
+                {
+                    psWO->padfDstNoDataImag[i] = psWO->padfSrcNoDataImag[i];
+                }
                 CPLDebug("WARP", "srcNoData=%f dstNoData=%f",
                             psWO->padfSrcNoDataReal[i], psWO->padfDstNoDataReal[i] );
 
@@ -1342,16 +1609,12 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
                                       psOptions->papszTO );
             if(eError == CE_Failure)
             {
-                if( hTransformArg != NULL )
-                    GDALDestroyTransformer( hTransformArg );
+                GDALDestroyTransformer( hTransformArg );
                 GDALDestroyWarpOptions( psWO );
                 GDALWarpAppOptionsFree(psOptions);
-                if( hCutline != NULL )
-                    OGR_G_DestroyGeometry( (OGRGeometryH) hCutline );
-                if( bMustCloseDstDSInCaseOfError )
-                    GDALClose(hDstDS);
-                if( poSrcOvrDS )
-                    delete poSrcOvrDS;
+                OGR_G_DestroyGeometry( hCutline );
+                GDALReleaseDataset(hWrkSrcDS);
+                GDALReleaseDataset(hDstDS);
                 return NULL;
             }
         }
@@ -1364,44 +1627,31 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
         if( bVRT )
         {
             GDALSetMetadataItem(hDstDS, "SrcOvrLevel", CPLSPrintf("%d", psOptions->nOvLevel), NULL);
-            if( GDALInitializeWarpedVRT( hDstDS, psWO ) != CE_None )
+            CPLErr eErr = GDALInitializeWarpedVRT( hDstDS, psWO );
+            GDALDestroyWarpOptions( psWO );
+            GDALWarpAppOptionsFree(psOptions);
+            OGR_G_DestroyGeometry( hCutline );
+            GDALReleaseDataset(hWrkSrcDS);
+            if( eErr != CE_None )
             {
-                if( hTransformArg != NULL )
-                    GDALDestroyTransformer( hTransformArg );
-                GDALDestroyWarpOptions( psWO );
-                GDALWarpAppOptionsFree(psOptions);
-                if( hCutline != NULL )
-                    OGR_G_DestroyGeometry( (OGRGeometryH) hCutline );
-                if( bMustCloseDstDSInCaseOfError )
-                    GDALClose(hDstDS);
-                if( poSrcOvrDS )
-                    delete poSrcOvrDS;
+                GDALDestroyTransformer( hTransformArg );
+                GDALReleaseDataset(hDstDS);
                 return NULL;
             }
-
-            // We need to close it before destroying poSrcOvrDS and warping options
-            CPLString osDstFilename(GDALGetDescription(hDstDS));
-
-            char** papszContent = NULL;
-            if( osDstFilename.empty() )
-                papszContent = CSLDuplicate(GDALGetMetadata(hDstDS, "xml:VRT"));
-
-            GDALClose(hDstDS);
-
-            if( poSrcOvrDS )
-                delete poSrcOvrDS;
-
-            GDALDestroyWarpOptions( psWO );
-
-            GDALWarpAppOptionsFree(psOptions);
-            if( papszContent == NULL )
-                return GDALOpen(osDstFilename, GA_Update);
-            else
+            // In case of success, hDstDS has become the owner of hTransformArg
+            // so do not free it.
+            if( !EQUAL(pszDest, "") )
             {
-                GDALDatasetH hDSRet = GDALOpen(papszContent[0], GA_ReadOnly);
-                CSLDestroy(papszContent);
-                return hDSRet;
+                CPLErr eErrBefore = CPLGetLastErrorType();
+                GDALFlushCache( hDstDS );
+                if (eErrBefore == CE_None &&
+                    CPLGetLastErrorType() != CE_None)
+                {
+                    GDALReleaseDataset(hDstDS);
+                    hDstDS = NULL;
+                }
             }
+            return hDstDS;
         }
 
 /* -------------------------------------------------------------------- */
@@ -1423,17 +1673,19 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
             if (eErr != CE_None)
                 bHasGotErr = TRUE;
         }
+        else
+        {
+            bHasGotErr = TRUE;
+        }
 
 /* -------------------------------------------------------------------- */
 /*      Cleanup                                                         */
 /* -------------------------------------------------------------------- */
-        if( hTransformArg != NULL )
-            GDALDestroyTransformer( hTransformArg );
+        GDALDestroyTransformer( hTransformArg );
 
         GDALDestroyWarpOptions( psWO );
 
-        if( poSrcOvrDS )
-            delete poSrcOvrDS;
+        GDALReleaseDataset(hWrkSrcDS);
     }
 
 /* -------------------------------------------------------------------- */
@@ -1447,13 +1699,20 @@ GDALDatasetH GDALWarp( const char *pszDest, GDALDatasetH hDstDS, int nSrcCount,
         bHasGotErr = TRUE;
     }
 
-    if( hCutline != NULL )
-        OGR_G_DestroyGeometry( (OGRGeometryH) hCutline );
+    OGR_G_DestroyGeometry( hCutline );
 
     GDALWarpAppOptionsFree(psOptions);
 
-    if( bHasGotErr && bMustCloseDstDSInCaseOfError )
-        GDALClose(hDstDS);
+    if( bHasGotErr || bDropDstDSRef )
+        GDALReleaseDataset(hDstDS);
+
+#ifdef DEBUG
+    if( !bHasGotErr || bDropDstDSRef )
+    {
+        CPLAssert( poDstDS->GetRefCount() == nExpectedRefCountAtEnd );
+    }
+#endif
+
     return (bHasGotErr) ? NULL : hDstDS;
 }
 
@@ -1555,7 +1814,7 @@ static bool LooseValidateCutline(OGRGeometryH hGeom)
 static CPLErr
 LoadCutline( const char *pszCutlineDSName, const char *pszCLayer,
              const char *pszCWHERE, const char *pszCSQL,
-             void **phCutlineRet )
+             OGRGeometryH* phCutlineRet )
 
 {
     OGRRegisterAll();
@@ -1653,7 +1912,7 @@ LoadCutline( const char *pszCutlineDSName, const char *pszCLayer,
     OGR_G_AssignSpatialReference(
         hMultiPolygon, OGR_L_GetSpatialRef(hLayer) );
 
-    *phCutlineRet = (void *) hMultiPolygon;
+    *phCutlineRet = hMultiPolygon;
 
 /* -------------------------------------------------------------------- */
 /*      Cleanup                                                         */
@@ -2313,11 +2572,11 @@ double GetMaximumSegmentLength( OGRGeometry* poGeom )
 /*      Transform cutline from its SRS to source pixel/line coordinates.*/
 /************************************************************************/
 static CPLErr
-TransformCutlineToSource( GDALDatasetH hSrcDS, void *hCutline,
+TransformCutlineToSource( GDALDatasetH hSrcDS, OGRGeometryH hCutline,
                           char ***ppapszWarpOptions, char **papszTO_In )
 
 {
-    OGRGeometryH hMultiPolygon = OGR_G_Clone( (OGRGeometryH) hCutline );
+    OGRGeometryH hMultiPolygon = OGR_G_Clone( hCutline );
 
 /* -------------------------------------------------------------------- */
 /*      Checkout that if there's a cutline SRS, there's also a raster   */
@@ -2488,11 +2747,20 @@ TransformCutlineToSource( GDALDatasetH hSrcDS, void *hCutline,
 
         // Densify and reproject with the aim of having a 1 pixel density
         double dfSegmentSize = dfMaxLengthInSpatUnits / dfInitialMaxLengthInPixels;
-        for(int i=0;i<10;i++)
+        const int MAX_ITERATIONS = 10;
+        for(int i=0;i<MAX_ITERATIONS;i++)
         {
             OGR_G_DestroyGeometry( hMultiPolygon );
-            hMultiPolygon = OGR_G_Clone( (OGRGeometryH) hCutline );
+            hMultiPolygon = OGR_G_Clone( hCutline );
             OGR_G_Segmentize(hMultiPolygon, dfSegmentSize);
+            if( i == MAX_ITERATIONS - 1 )
+            {
+                char* pszWKT = NULL;
+                OGR_G_ExportToWkt(hMultiPolygon, &pszWKT);
+                CPLDebug("WARP", "WKT of polygon after densification with segment size = %f: %s",
+                         dfSegmentSize, pszWKT);
+                CPLFree(pszWKT);
+            }
             eErr = OGR_G_Transform( hMultiPolygon,
                         (OGRCoordinateTransformationH) &oTransformer );
             if( eErr == OGRERR_NONE )
@@ -2509,6 +2777,19 @@ TransformCutlineToSource( GDALDatasetH hSrcDS, void *hCutline,
                     CPLPopErrorHandler();
                     if( !bIsValid )
                     {
+                        if( i == MAX_ITERATIONS - 1 )
+                        {
+                            char* pszWKT = NULL;
+                            OGR_G_ExportToWkt(hMultiPolygon, &pszWKT);
+                            CPLDebug("WARP",
+                                     "After densification, cutline maximum "
+                                     "segment size is now %.0f pixel, "
+                                     "but cutline is invalid. %s",
+                                     dfMaxLengthInPixels,
+                                     pszWKT);
+                            CPLFree(pszWKT);
+                            break;
+                        }
                         CPLDebug("WARP", "After densification, cutline maximum segment size is now %.0f pixel, "
                                  "but cutline is invalid. So trying a less dense cutline.",
                                  dfMaxLengthInPixels);
@@ -2681,6 +2962,7 @@ GDALWarpAppOptions *GDALWarpAppOptionsNew(char** papszArgv,
     psOptions->pszMDConflictValue = CPLStrdup("*");
     psOptions->bSetColorInterpretation = false;
     psOptions->nOvLevel = -2;
+    psOptions->bNoVShiftGrid = false;
 
 /* -------------------------------------------------------------------- */
 /*      Parse arguments.                                                */
@@ -3052,6 +3334,10 @@ GDALWarpAppOptions *GDALWarpAppOptionsNew(char** papszArgv,
                 GDALWarpAppOptionsFree(psOptions);
                 return NULL;
             }
+        }
+        else if( EQUAL(papszArgv[i],"-novshiftgrid") )
+        {
+            psOptions->bNoVShiftGrid = true;
         }
         else if( papszArgv[i][0] == '-' )
         {

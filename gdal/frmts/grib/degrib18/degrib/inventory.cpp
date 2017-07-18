@@ -243,7 +243,7 @@ static int InventoryParseTime (char *is, double *AnsTime)
  *****************************************************************************
  */
 static int GRIB2SectToBuffer (DataSource &fp,
-                              CPL_UNUSED uInt4 gribLen,
+                              uInt4 gribLen,
                               sChar *sect,
                               uInt4 *secLen, uInt4 *buffLen, char **buff)
 {
@@ -257,12 +257,24 @@ static int GRIB2SectToBuffer (DataSource &fp,
       }
       return -1;
    }
-   if( *secLen < sizeof(sInt4) )
+   if( *secLen < sizeof(sInt4) || *secLen > gribLen )
    {
        errSprintf ("ERROR: Wrong secLen in GRIB2SectToBuffer\n");
        return -1;
    }
    if (*buffLen < *secLen) {
+      if( *secLen > 100 * 1024 * 1024 )
+      {
+          long curPos = fp.DataSourceFtell();
+          fp.DataSourceFseek(0, SEEK_END);
+          long fileSize = fp.DataSourceFtell();
+          fp.DataSourceFseek(curPos, SEEK_SET);
+          if( *secLen > (uInt4)fileSize )
+          {
+            errSprintf ("ERROR: File too short\n");
+            return -1;
+          }
+      }
       char* buffnew = (char *) realloc ((void *) *buff, *secLen * sizeof (char));
       if( buffnew == NULL )
       {
@@ -526,6 +538,8 @@ enum { GS4_ANALYSIS, GS4_ENSEMBLE, GS4_DERIVED, GS4_PROBABIL_PNT = 5,
       lenTime = (sInt4) (inv->foreSec / 3600);
       switch (templat) {
          case GS4_PROBABIL_PNT: /* 4.5 */
+            if( *buffLen < 44 - 5 + 4)
+                return -8;
             probType = (*buffer)[37 - 5];
             factor = (sChar) (*buffer)[38 - 5];
             MEMCPY_BIG (&value, *buffer + 39 - 5, sizeof (sInt4));
@@ -535,6 +549,8 @@ enum { GS4_ANALYSIS, GS4_ENSEMBLE, GS4_DERIVED, GS4_PROBABIL_PNT = 5,
             upperProb = value * pow (10.0, -1 * factor);
             break;
          case GS4_DERIVED_INTERVAL: /* 4.12 */
+            if( *buffLen < 52 - 5 + 4)
+                return -8;
             if (InventoryParseTime (*buffer + 37 - 5, &(inv->validTime)) != 0) {
                printf ("Warning: Investigate Template 4.12 bytes 37-43\n");
                inv->validTime = inv->refTime + inv->foreSec;
@@ -551,6 +567,8 @@ enum { GS4_ANALYSIS, GS4_ENSEMBLE, GS4_DERIVED, GS4_PROBABIL_PNT = 5,
 */
             break;
          case GS4_PERCENTILE: /* 4.10 */
+            if( *buffLen < 51 - 5 + 4)
+                return -8;
             percentile = (*buffer)[35 - 5];
             if (InventoryParseTime (*buffer + 36 - 5, &(inv->validTime)) != 0) {
                printf ("Warning: Investigate Template 4.10 bytes 36-42\n");
@@ -568,6 +586,8 @@ enum { GS4_ANALYSIS, GS4_ENSEMBLE, GS4_DERIVED, GS4_PROBABIL_PNT = 5,
 */
             break;
          case GS4_STATISTIC: /* 4.8 */
+            if( *buffLen < 50 - 5 + 4)
+                return -8;
             if (InventoryParseTime (*buffer + 35 - 5, &(inv->validTime)) != 0) {
                printf ("Warning: Investigate Template 4.8 bytes 35-41\n");
                inv->validTime = inv->refTime + inv->foreSec;
@@ -584,6 +604,8 @@ enum { GS4_ANALYSIS, GS4_ENSEMBLE, GS4_DERIVED, GS4_PROBABIL_PNT = 5,
 */
             break;
          case GS4_ENSEMBLE_STAT: /* 4.11 */
+            if( *buffLen < 53 - 5 + 4)
+                return -8;
             if (InventoryParseTime (*buffer + 38 - 5, &(inv->validTime)) != 0) {
                printf ("Warning: Investigate Template 4.11 bytes 38-44\n");
                inv->validTime = inv->refTime + inv->foreSec;
@@ -600,6 +622,8 @@ enum { GS4_ANALYSIS, GS4_ENSEMBLE, GS4_DERIVED, GS4_PROBABIL_PNT = 5,
 */
             break;
          case GS4_PROBABIL_TIME: /* 4.9 */
+            if( *buffLen < 63 - 5 + 4)
+                return -8;
             probType = (*buffer)[37 - 5];
             if ((uChar) (*buffer)[38 - 5] > 128) {
                factor = 128 - (uChar) (*buffer)[38 - 5];
@@ -647,15 +671,23 @@ enum { GS4_ANALYSIS, GS4_ENSEMBLE, GS4_DERIVED, GS4_PROBABIL_PNT = 5,
       timeRangeUnit = 1;
    } else if (timeRangeUnit == 1) {
    } else if (timeRangeUnit == 2) {
+      if( lenTime < INT_MIN / 24 || lenTime > INT_MAX / 24 )
+          return -8;
       lenTime = lenTime * 24;
       timeRangeUnit = 1;
    } else if (timeRangeUnit == 10) {
+      if( lenTime < INT_MIN / 3 || lenTime > INT_MAX / 3 )
+          return -8;
       lenTime = lenTime * 3;
       timeRangeUnit = 1;
    } else if (timeRangeUnit == 11) {
+      if( lenTime < INT_MIN / 6 || lenTime > INT_MAX / 6 )
+          return -8;
       lenTime = lenTime * 6;
       timeRangeUnit = 1;
    } else if (timeRangeUnit == 12) {
+      if( lenTime < INT_MIN / 12 || lenTime > INT_MAX / 12 )
+          return -8;
       lenTime = lenTime * 12;
       timeRangeUnit = 1;
    } else if (timeRangeUnit == 13) {
@@ -679,6 +711,8 @@ enum { GS4_ANALYSIS, GS4_ENSEMBLE, GS4_DERIVED, GS4_PROBABIL_PNT = 5,
       sndSurfValue = 0;
       f_sndValue = 0;
    } else {
+        if( *buffLen < 31 - 5 + 4)
+            return -8;
       fstSurfType = (*buffer)[23 - 5];
       scale = (*buffer)[24 - 5];
       MEMCPY_BIG (&value, *buffer + 25 - 5, sizeof (sInt4));
@@ -822,12 +856,14 @@ int GRIB2Inventory (DataSource &fp, inventoryType **Inv, uInt4 *LenInv,
    char *msg;           /* Used to pop messages off the error Stack. */
    int version;         /* Which version of GRIB is in this message. */
    uChar prodType;      /* Which GRIB2 type of product, 0 is meteo, 1 is
-                         * hydro, 2 is land, 3 is space, 10 is oceanographic. 
+                         * hydro, 2 is land, 3 is space, 10 is oceanographic.
                          */
-   int grib_limit;      /* How many bytes to look for before the first "GRIB" 
+   int grib_limit;      /* How many bytes to look for before the first "GRIB"
                          * in the file.  If not found, is not a GRIB file. */
    int c;               /* Determine if end of the file without fileLen. */
+#ifdef DEBUG
    sInt4 fileLen;       /* Length of the GRIB2 file. */
+#endif
    unsigned short int center, subcenter; /* Who produced it. */
    // char *ptr;           /* used to find the file extension. */
 
@@ -890,12 +926,14 @@ int GRIB2Inventory (DataSource &fp, inventoryType **Inv, uInt4 *LenInv,
                     msgNum);
             printf ("%s", msg);
             free (msg);
+#ifdef DEBUG
             /* find out how big the file is. */
             fp.DataSourceFseek (0L, SEEK_END);
             fileLen = static_cast<int>(fp.DataSourceFtell());
             /* fseek (fp, 0L, SEEK_SET); */
             printf ("There were %d trailing bytes in the file.\n",
                     fileLen - offset);
+#endif
             free (buffer);
             free (buff);
             //fclose (fp);
@@ -951,6 +989,14 @@ int GRIB2Inventory (DataSource &fp, inventoryType **Inv, uInt4 *LenInv,
             return -4;
          }
          /* Parse the interesting data out of sect 1. */
+         if( bufferLen < 13 - 5 + 7 )
+         {
+            errSprintf ("ERROR: Problems with section 1\n");
+            free (buffer);
+            free (buff);
+            return -4;
+         }
+         /* InventoryParseTime reads 7 bytes */
          InventoryParseTime (buffer + 13 - 5, &(inv->refTime));
          MEMCPY_BIG (&center, buffer + 6 - 5, sizeof (short int));
          MEMCPY_BIG (&subcenter, buffer + 8 - 5, sizeof (short int));
@@ -1028,6 +1074,8 @@ int GRIB2Inventory (DataSource &fp, inventoryType **Inv, uInt4 *LenInv,
       if (numMsg == msgNum) {
          break;
       }
+      {
+      uInt4 increment;
       /* Continue on to the next GRIB2 message. */
       if (version == -1) {
          /* TDLPack uses 4 bytes for FORTRAN record size, then another 8
@@ -1036,9 +1084,13 @@ int GRIB2Inventory (DataSource &fp, inventoryType **Inv, uInt4 *LenInv,
           * bytes for a final FORTRAN record size.  However it only stores
           * in_ the gribLen the non-rounded amount, so we need to take care
           * of the rounding, and the trailing 4 bytes here. */
-         offset += buffLen + ((sInt4) ceil (gribLen / 8.0)) * 8 + 4;
+         increment = buffLen + ((uInt4) ceil (gribLen / 8.0)) * 8 + 4;
       } else {
-         offset += buffLen + gribLen;
+         increment = buffLen + gribLen;
+      }
+      if( increment < buffLen || increment > (uInt4)(INT_MAX - offset) )
+          break;
+      offset += increment;
       }
       fp.DataSourceFseek (offset, SEEK_SET);
    }
@@ -1049,7 +1101,7 @@ int GRIB2Inventory (DataSource &fp, inventoryType **Inv, uInt4 *LenInv,
    return msgNum;
 }
 
-int GRIB2RefTime (char *filename, double *refTime)
+int GRIB2RefTime (const char *filename, double *refTime)
 {
    FileDataSource fp (filename);            /* The opened GRIB2 file. */
    sInt4 offset = 0;    /* Where we are in the file. */
@@ -1067,13 +1119,15 @@ int GRIB2RefTime (char *filename, double *refTime)
    char *msg;           /* Used to pop messages off the error Stack. */
    int version;         /* Which version of GRIB is in this message. */
    /* uChar prodType; */      /* Which GRIB2 type of product, 0 is meteo, 1 is
-                         * hydro, 2 is land, 3 is space, 10 is oceanographic. 
+                         * hydro, 2 is land, 3 is space, 10 is oceanographic.
                          */
-   int grib_limit;      /* How many bytes to look for before the first "GRIB" 
+   int grib_limit;      /* How many bytes to look for before the first "GRIB"
                          * in the file.  If not found, is not a GRIB file. */
    int c;               /* Determine if end of the file without fileLen. */
+#ifdef DEBUG
    sInt4 fileLen;       /* Length of the GRIB2 file. */
-   char *ptr;           /* used to find the file extension. */
+#endif
+   const char *ptr;           /* used to find the file extension. */
    double refTime1;
 
    grib_limit = GRIB_LIMIT;
@@ -1122,12 +1176,14 @@ int GRIB2RefTime (char *filename, double *refTime)
             printf ("Warning: Inside GRIB2RefTime, Message # %d\n", msgNum);
             printf ("%s", msg);
             free (msg);
+#ifdef DEBUG
             /* find out how big the file is. */
             fp.DataSourceFseek (0L, SEEK_END);
             fileLen = static_cast<int>(fp.DataSourceFtell());
             /* fseek (fp, 0L, SEEK_SET); */
             printf ("There were %d trailing bytes in the file.\n",
                     fileLen - offset);
+#endif
             free (buffer);
             free (buff);
             //fclose (fp);

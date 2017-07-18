@@ -36,7 +36,7 @@
 #include "FGdbUtils.h"
 #include "cpl_minixml.h" // the only way right now to extract schema information
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 using std::string;
 using std::wstring;
@@ -1195,7 +1195,7 @@ OGRErr FGdbLayer::ICreateFeature( OGRFeature *poFeature )
         poGeom->getEnvelope(&sFeatureGeomEnvelope);
         if (!m_bLayerEnvelopeValid)
         {
-            memcpy(&sLayerEnvelope, &sFeatureGeomEnvelope, sizeof(sLayerEnvelope));
+            sLayerEnvelope = sFeatureGeomEnvelope;
             m_bLayerEnvelopeValid = true;
         }
         else
@@ -1230,7 +1230,7 @@ OGRErr FGdbLayer::PopulateRowWithFeature( Row& fgdb_row, OGRFeature *poFeature )
         const std::string & strFieldType = m_vOGRFieldToESRIFieldType[i];
 
         /* Set empty fields to NULL */
-        if( !poFeature->IsFieldSet( i ) )
+        if( !poFeature->IsFieldSetAndNotNull( i ) )
         {
             if( strFieldType == "esriFieldTypeGlobalID" )
                 continue;
@@ -3203,7 +3203,8 @@ bool FGdbBaseLayer::OGRFeatureFromGdbRow(Row* pRow, OGRFeature** ppFeature)
 
         if (isNull)
         {
-            continue; //leave as unset
+            pOutFeature->SetFieldNull(i);
+            continue;
         }
 
         //

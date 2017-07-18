@@ -1035,7 +1035,7 @@ def ogr_sqlite_19_bis():
         print(nb_srs)
         return 'fail'
 
-    gdal.Unlink('/vsimem/spatialite_test_without_epsg.d')
+    gdal.Unlink('/vsimem/spatialite_test_without_epsg.db')
 
     return 'success'
 
@@ -2953,7 +2953,7 @@ def ogr_sqlite_38():
     f = lyr.GetNextFeature()
     if f.GetField('field_string') != 'a\'b' or f.GetField('field_int') != 123 or \
        f.GetField('field_real') != 1.23 or \
-       f.IsFieldSet('field_nodefault') or not f.IsFieldSet('field_datetime')  or \
+       not f.IsFieldNull('field_nodefault') or not f.IsFieldSet('field_datetime')  or \
        f.GetField('field_datetime2') != '2015/06/30 12:34:56' or \
        f.GetField('field_datetime4') != '2015/06/30 12:34:56.123' or \
        not f.IsFieldSet('field_datetime3') or \
@@ -3488,6 +3488,14 @@ def ogr_sqlite_45():
     if gdaltest.sl_ds is None:
         return 'skip'
     
+    if gdaltest.sl_ds is None:
+        return 'skip'
+
+    # Only available since sqlite 3.7.0
+    version = ogrtest.sqlite_version.split('.')
+    if not (len(version) >= 3 and int(version[0])*10000 + int(version[1])*100 + int(version[2]) >= 30700):
+        return 'skip'
+
     ds = ogr.GetDriverByName('SQLite').CreateDataSource('tmp/ogr_sqlite_45.db')
     sql_lyr = ds.ExecuteSQL('PRAGMA journal_mode = WAL')
     ds.ReleaseResultSet(sql_lyr)
@@ -3542,6 +3550,26 @@ def ogr_spatialite_11():
     ds = None
 
     gdal.Unlink('/vsimem/ogr_spatialite_11.sqlite')
+
+    return 'success'
+
+###############################################################################
+# Test opening a .sql file
+
+def ogr_spatialite_12():
+
+    if gdaltest.has_spatialite == False:
+        return 'skip'
+
+    if gdal.GetDriverByName('SQLite').GetMetadataItem("ENABLE_SQL_SQLITE_FORMAT") != 'YES':
+        return 'skip'
+
+    ds = ogr.Open('data/poly_spatialite.sqlite.sql')
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    if f is None:
+        gdaltest.post_reason('fail')
+        return 'fail'
 
     return 'success'
 
@@ -3733,6 +3761,7 @@ gdaltest_list = [
     ogr_sqlite_44,
     ogr_sqlite_45,
     ogr_spatialite_11,
+    ogr_spatialite_12,
     ogr_sqlite_cleanup,
     ogr_sqlite_without_spatialite,
 ]

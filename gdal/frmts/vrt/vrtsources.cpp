@@ -28,12 +28,29 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
-#include "cpl_minixml.h"
-#include "cpl_string.h"
-#include "gdal_proxy.h"
+#include "gdal_vrt.h"
 #include "vrtdataset.h"
 
+#include <climits>
+#include <cmath>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <algorithm>
+#include <string>
+
+#include "cpl_conv.h"
+#include "cpl_error.h"
+#include "cpl_hash_set.h"
+#include "cpl_minixml.h"
+#include "cpl_progress.h"
+#include "cpl_string.h"
+#include "cpl_vsi.h"
+#include "gdal.h"
+#include "gdal_priv.h"
+#include "gdal_proxy.h"
+#include "gdal_priv_templates.hpp"
 
 /*! @cond Doxygen_Suppress */
 
@@ -48,7 +65,7 @@
 #define isnan std::isnan
 #endif
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /* ==================================================================== */
@@ -124,28 +141,35 @@ VRTSimpleSource::VRTSimpleSource( const VRTSimpleSource* poSrcSource,
 VRTSimpleSource::~VRTSimpleSource()
 
 {
-    // We use bRelativeToVRTOri to know if the file has been opened from
-    // XMLInit(), and thus we are sure that no other code has a direct
-    // reference to the dataset.
     if( m_poMaskBandMainBand != NULL )
     {
         if( m_poMaskBandMainBand->GetDataset() != NULL )
         {
-            if( m_poMaskBandMainBand->GetDataset()->GetShared() ||
-                m_bRelativeToVRTOri >= 0 )
-                GDALClose( m_poMaskBandMainBand->GetDataset() );
-            else
-                m_poMaskBandMainBand->GetDataset()->Dereference();
+            m_poMaskBandMainBand->GetDataset()->ReleaseRef();
         }
     }
     else if( m_poRasterBand != NULL && m_poRasterBand->GetDataset() != NULL )
     {
-        if( m_poRasterBand->GetDataset()->GetShared() ||
-            m_bRelativeToVRTOri >= 0 )
-            GDALClose( m_poRasterBand->GetDataset() );
-        else
-            m_poRasterBand->GetDataset()->Dereference();
+        m_poRasterBand->GetDataset()->ReleaseRef();
     }
+}
+
+/************************************************************************/
+/*                           FlushCache()                               */
+/************************************************************************/
+
+CPLErr VRTSimpleSource::FlushCache()
+
+{
+    if( m_poMaskBandMainBand != NULL )
+    {
+        return m_poMaskBandMainBand->FlushCache();
+    }
+    else if( m_poRasterBand != NULL )
+    {
+        return m_poRasterBand->FlushCache();
+    }
+    return CE_None;
 }
 
 /************************************************************************/
@@ -447,7 +471,8 @@ CPLXMLNode *VRTSimpleSource::SerializeToXML( const char *pszVRTPath )
 /*                              XMLInit()                               */
 /************************************************************************/
 
-CPLErr VRTSimpleSource::XMLInit( CPLXMLNode *psSrc, const char *pszVRTPath )
+CPLErr VRTSimpleSource::XMLInit( CPLXMLNode *psSrc, const char *pszVRTPath,
+                                 void* pUniqueHandle )
 
 {
     m_osResampling = CPLGetXMLValue( psSrc, "resampling", "");
@@ -641,9 +666,11 @@ CPLErr VRTSimpleSource::XMLInit( CPLXMLNode *psSrc, const char *pszVRTPath )
         /* ----------------------------------------------------------------- */
         /*      Create a proxy dataset                                       */
         /* ----------------------------------------------------------------- */
+        CPLString osUniqueHandle( CPLSPrintf("%p", pUniqueHandle) );
         GDALProxyPoolDataset * const proxyDS =
             new GDALProxyPoolDataset( pszSrcDSName, nRasterXSize, nRasterYSize,
-                                      GA_ReadOnly, bShared );
+                                      GA_ReadOnly, bShared, NULL, NULL,
+                                      osUniqueHandle.c_str() );
         proxyDS->SetOpenOptions(papszOpenOptions);
         poSrcDS = proxyDS;
 
@@ -772,7 +799,7 @@ void VRTSimpleSource::GetFileList( char*** ppapszFileList, int *pnSize,
 /* -------------------------------------------------------------------- */
         if( *pnSize + 1 >= *pnMaxSize )
         {
-            *pnMaxSize = 2 + 2 * (*pnMaxSize);
+            *pnMaxSize = std::max(*pnSize + 2, 2 + 2 * (*pnMaxSize));
             *ppapszFileList = static_cast<char **>( CPLRealloc(
                 *ppapszFileList, sizeof(char*) * (*pnMaxSize) ) );
         }
@@ -1135,12 +1162,12 @@ int VRTSimpleSource::NeedMaxValAdjustment() const
     const char* pszNBITS =
         m_poRasterBand->GetMetadataItem("NBITS", "IMAGE_STRUCTURE");
     const int nBits = (pszNBITS) ? atoi(pszNBITS) : 0;
-    const int nBandMaxValue = (1 << nBits) - 1;
-    if( nBandMaxValue == 0 || nBandMaxValue > m_nMaxValue )
+    if( nBits >= 1 && nBits <= 31 )
     {
-        return TRUE;
+        const int nBandMaxValue = static_cast<int>((1U << nBits) - 1);
+        return nBandMaxValue > m_nMaxValue;
     }
-    return FALSE;
+    return TRUE;
 }
 
 /************************************************************************/
@@ -1775,7 +1802,9 @@ VRTAveragedSource::RasterIO( int nXOff, int nYOff, int nXSize, int nYSize,
                         continue;
 
                     if( m_bNoDataSet &&
-                        ARE_REAL_EQUAL(fSampledValue, m_dfNoDataValue))
+                        GDALIsValueInRange<float>(m_dfNoDataValue) &&
+                        ARE_REAL_EQUAL(fSampledValue,
+                                       static_cast<float>(m_dfNoDataValue)))
                         continue;
 
                     nPixelCount++;
@@ -2054,14 +2083,16 @@ CPLXMLNode *VRTComplexSource::SerializeToXML( const char *pszVRTPath )
 /*                              XMLInit()                               */
 /************************************************************************/
 
-CPLErr VRTComplexSource::XMLInit( CPLXMLNode *psSrc, const char *pszVRTPath )
+CPLErr VRTComplexSource::XMLInit( CPLXMLNode *psSrc, const char *pszVRTPath,
+                                  void* pUniqueHandle )
 
 {
 /* -------------------------------------------------------------------- */
 /*      Do base initialization.                                         */
 /* -------------------------------------------------------------------- */
     {
-        const CPLErr eErr = VRTSimpleSource::XMLInit( psSrc, pszVRTPath );
+        const CPLErr eErr = VRTSimpleSource::XMLInit( psSrc, pszVRTPath,
+                                                      pUniqueHandle );
         if( eErr != CE_None )
             return eErr;
     }
@@ -2451,7 +2482,8 @@ CPLErr VRTComplexSource::RasterIOInternal( int nReqXOff, int nReqYOff,
                 if( bNoDataSetIsNan && CPLIsNan(fResult) )
                     continue;
                 if( bNoDataSetAndNotNan &&
-                    ARE_REAL_EQUAL(fResult, m_dfNoDataValue) )
+                    GDALIsValueInRange<WorkingDT>(m_dfNoDataValue) &&
+                    ARE_REAL_EQUAL(fResult, static_cast<WorkingDT>(m_dfNoDataValue)) )
                     continue;
 
                 if( m_nColorTableComponent )
@@ -2568,19 +2600,21 @@ CPLErr VRTComplexSource::RasterIOInternal( int nReqXOff, int nReqYOff,
             }
             else
             {
-                WorkingDT fResult = static_cast<WorkingDT>(m_dfScaleOff);
+                WorkingDT afResult[2] = {
+                    static_cast<WorkingDT>(m_dfScaleOff),
+                    0 };
 
                 if( m_nLUTItemCount )
-                    fResult = static_cast<WorkingDT>(LookupValue( fResult ));
+                    afResult[0] = static_cast<WorkingDT>(LookupValue( afResult[0] ));
 
-                if( m_nMaxValue != 0 && fResult > m_nMaxValue )
-                    fResult = static_cast<WorkingDT>(m_nMaxValue);
+                if( m_nMaxValue != 0 && afResult[0] > m_nMaxValue )
+                    afResult[0] = static_cast<WorkingDT>(m_nMaxValue);
 
                 if( eBufType == GDT_Byte )
                     *pDstLocation = static_cast<GByte>(
-                        std::min(255.0, std::max(0.0, fResult + 0.5)) );
+                        std::min(255.0, std::max(0.0, afResult[0] + 0.5)) );
                 else
-                    GDALCopyWords( &fResult, eWrkDataType, 0,
+                    GDALCopyWords( afResult, eWrkDataType, 0,
                                    pDstLocation, eBufType, 0, 1 );
             }
         }
@@ -2842,7 +2876,8 @@ CPLErr VRTFuncSource::GetHistogram( int /* nXSize */,
 /*                        VRTParseCoreSources()                         */
 /************************************************************************/
 
-VRTSource *VRTParseCoreSources( CPLXMLNode *psChild, const char *pszVRTPath )
+VRTSource *VRTParseCoreSources( CPLXMLNode *psChild, const char *pszVRTPath,
+                                void* pUniqueHandle )
 
 {
     VRTSource * poSource = NULL;
@@ -2869,7 +2904,7 @@ VRTSource *VRTParseCoreSources( CPLXMLNode *psChild, const char *pszVRTPath )
         return NULL;
     }
 
-    if( poSource->XMLInit( psChild, pszVRTPath ) == CE_None )
+    if( poSource->XMLInit( psChild, pszVRTPath, pUniqueHandle ) == CE_None )
         return poSource;
 
     delete poSource;

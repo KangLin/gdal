@@ -32,7 +32,7 @@
 #include "cpl_time.h"
 #include "cpl_vsi_error.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 namespace OGRXLSX {
 
@@ -1271,7 +1271,7 @@ void OGRXLSXDataSource::startElementWBCbk(const char *pszNameIn,
             if( !oMapRelsIdToTarget[pszId].empty() &&
                 oMapRelsIdToTarget[pszId][0] == '/' )
             {
-                // Is it an "absolute" path ? 
+                // Is it an "absolute" path ?
                 osFilename = "/vsizip/" + CPLString(pszName) +
                              oMapRelsIdToTarget[pszId];
             }
@@ -1852,7 +1852,7 @@ static void WriteLayer(const char* pszName, OGRLayer* poLayer, int iLayer,
         VSIFPrintfL(fp, "<row r=\"%d\">\n", iRow);
         for( int j=0;j<poFeature->GetFieldCount();j++)
         {
-            if (poFeature->IsFieldSet(j))
+            if (poFeature->IsFieldSetAndNotNull(j))
             {
                 char szCol[5];
                 BuildColString(szCol, j);

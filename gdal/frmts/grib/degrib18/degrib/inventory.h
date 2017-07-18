@@ -38,7 +38,7 @@ typedef struct {
                               * for the others it is refTime + foreSec. */
    char *element;            /* Character look up of variable type. */
    char *comment;            /* A more descriptive look up of variable type. */
-   char *unitName;           /* The unit of this element. */ 
+   char *unitName;           /* The unit of this element. */
    double foreSec;           /* Forecast element in seconds. */
    char *shortFstLevel;      /* Short description of the level of this data
                                 (above ground) (500 mb), etc */
@@ -54,7 +54,7 @@ void GRIB2InventoryPrint (inventoryType *Inv, uInt4 LenInv);
 int GRIB2Inventory (DataSource &fp, inventoryType ** Inv, uInt4 *LenInv,
                     int numMsg, int *MsgNum);
 
-int GRIB2RefTime (char *filename, double *refTime);
+int GRIB2RefTime (const char *filename, double *refTime);
 
 #ifdef __cplusplus
 }

@@ -45,9 +45,9 @@
 #include "cpl_string.h"
 #include "cpl_vsi_virtual.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
-#if defined(DEBUG) && !defined(HAVE_FUZZER_FRIENDLY_ARCHIVE)
+#if (defined(DEBUG) || defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION)) && !defined(HAVE_FUZZER_FRIENDLY_ARCHIVE)
 /* This is a completely custom archive format that is rather inefficient */
 /* but supports random insertions or deletions, since it doesn't record */
 /* explicit file size or rely on files starting on a particular boundary */

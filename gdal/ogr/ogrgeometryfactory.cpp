@@ -62,7 +62,7 @@
 #define UNUSED_IF_NO_GEOS
 #endif
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                           createFromWkb()                            */
@@ -107,6 +107,58 @@ OGRErr OGRGeometryFactory::createFromWkb( unsigned char *pabyData,
                                           OGRwkbVariant eWkbVariant )
 
 {
+    int nBytesConsumedOutIgnored = -1;
+    return createFromWkb( const_cast<const unsigned char*>(pabyData),
+                          poSR,
+                          ppoReturn,
+                          nBytes,
+                          eWkbVariant,
+                          nBytesConsumedOutIgnored);
+}
+
+/**
+ * \brief Create a geometry object of the appropriate type from it's
+ * well known binary representation.
+ *
+ * Note that if nBytes is passed as zero, no checking can be done on whether
+ * the pabyData is sufficient.  This can result in a crash if the input
+ * data is corrupt.  This function returns no indication of the number of
+ * bytes from the data source actually used to represent the returned
+ * geometry object.  Use OGRGeometry::WkbSize() on the returned geometry to
+ * establish the number of bytes it required in WKB format.
+ *
+ * Also note that this is a static method, and that there
+ * is no need to instantiate an OGRGeometryFactory object.
+ *
+ * The C function OGR_G_CreateFromWkb() is the same as this method.
+ *
+ * @param pabyData pointer to the input BLOB data.
+ * @param poSR pointer to the spatial reference to be assigned to the
+ *             created geometry object.  This may be NULL.
+ * @param ppoReturn the newly created geometry object will be assigned to the
+ *                  indicated pointer on return.  This will be NULL in case
+ *                  of failure. If not NULL, *ppoReturn should be freed with
+ *                  OGRGeometryFactory::destroyGeometry() after use.
+ * @param nBytes the number of bytes available in pabyData, or -1 if it isn't
+ *               known.
+ * @param eWkbVariant WKB variant.
+ * @param nBytesConsumedOut output parameter. Number of bytes consumed.
+ *
+ * @return OGRERR_NONE if all goes well, otherwise any of
+ * OGRERR_NOT_ENOUGH_DATA, OGRERR_UNSUPPORTED_GEOMETRY_TYPE, or
+ * OGRERR_CORRUPT_DATA may be returned.
+ * @since GDAL 2.3
+ */
+
+OGRErr OGRGeometryFactory::createFromWkb( const unsigned char *pabyData,
+                                          OGRSpatialReference * poSR,
+                                          OGRGeometry **ppoReturn,
+                                          int nBytes,
+                                          OGRwkbVariant eWkbVariant,
+                                          int& nBytesConsumedOut )
+
+{
+    nBytesConsumedOut = -1;
     *ppoReturn = NULL;
 
     if( nBytes < 9 && nBytes != -1 )
@@ -159,7 +211,8 @@ OGRErr OGRGeometryFactory::createFromWkb( unsigned char *pabyData,
 /* -------------------------------------------------------------------- */
 /*      Import from binary.                                             */
 /* -------------------------------------------------------------------- */
-    const OGRErr eErr = poGeom->importFromWkb( pabyData, nBytes, eWkbVariant );
+    const OGRErr eErr = poGeom->importFromWkb( pabyData, nBytes, eWkbVariant,
+                                               nBytesConsumedOut );
     if( eErr != OGRERR_NONE )
     {
         delete poGeom;
@@ -577,6 +630,9 @@ void OGR_G_DestroyGeometry( OGRGeometryH hGeom )
  * Starting with GDAL 2.0, curve polygons or closed curves will be changed to
  * polygons.  The passed in geometry is consumed and a new one returned (or
  * potentially the same one).
+ * 
+ * Note: the resulting polygon may break the Simple Features rules for polygons,
+ * for example when converting from a multi-part multipolygon.
  *
  * @param poGeom the input geometry - ownership is passed to the method.
  * @return new geometry.
@@ -1337,7 +1393,8 @@ typedef enum
  * @param papszOptions a list of strings for passing options
  *
  * @return a single resulting geometry (either OGRPolygon, OGRCurvePolygon,
- * OGRMultiPolygon, OGRMultiSurface or OGRGeometryCollection).
+ * OGRMultiPolygon, OGRMultiSurface or OGRGeometryCollection). Returns a
+ * POLYGON EMPTY in the case of nPolygonCount being 0.
  */
 
 OGRGeometry* OGRGeometryFactory::organizePolygons( OGRGeometry **papoPolygons,
@@ -1345,6 +1402,14 @@ OGRGeometry* OGRGeometryFactory::organizePolygons( OGRGeometry **papoPolygons,
                                                    int *pbIsValidGeometry,
                                                    const char** papszOptions )
 {
+    if( nPolygonCount == 0 )
+    {
+        if( pbIsValidGeometry )
+            *pbIsValidGeometry = TRUE;
+
+        return new OGRPolygon();
+    }
+
     OGRGeometry* geom = NULL;
     OrganizePolygonMethod method = METHOD_NORMAL;
     bool bHasCurves = false;
@@ -1441,6 +1506,7 @@ OGRGeometry* OGRGeometryFactory::organizePolygons( OGRGeometry **papoPolygons,
         if( eType == wkbCurvePolygon )
             bHasCurves = true;
         if( asPolyEx[i].poPolygon != NULL
+            && !asPolyEx[i].poPolygon->IsEmpty()
             && asPolyEx[i].poPolygon->getNumInteriorRings() == 0
             && asPolyEx[i].poPolygon->
                 getExteriorRingCurve()->getNumPoints() >= 4)
@@ -2030,7 +2096,7 @@ OGRGeometryFactory::createFromGEOS(
 
     return poGeometry;
 
-#endif  // HAVE_GEOS 
+#endif  // HAVE_GEOS
 }
 
 /************************************************************************/
@@ -3135,7 +3201,7 @@ static OGRGeometry* TransformBeforePolarToWGS84(
         poDstGeom->Contains(&oNearPoleAntimeridian));
 
     // Does the geometry touches the pole (but not intersect the antimeridian) ?
-    const bool bRegularTouchesPole = 
+    const bool bRegularTouchesPole =
         !bContainsPole &&
         !bContainsNearPoleAntimeridian &&
         CPL_TO_BOOL(poDstGeom->Touches(&oPole));
@@ -4468,6 +4534,9 @@ static inline double DISTANCE(double x1, double y1, double x2, double y2)
 /**
  * \brief Returns the parameter of an arc circle.
  *
+ * Angles are return in radians, with trigonometic convention (counter clock
+ * wise)
+ * 
  * @param x0 x of first point
  * @param y0 y of first point
  * @param x1 x of intermediate point
@@ -4477,9 +4546,9 @@ static inline double DISTANCE(double x1, double y1, double x2, double y2)
  * @param R radius (output)
  * @param cx x of arc center (output)
  * @param cy y of arc center (output)
- * @param alpha0 angle between center and first point (output)
- * @param alpha1 angle between center and intermediate point (output)
- * @param alpha2 angle between center and final point (output)
+ * @param alpha0 angle between center and first point, in radians (output)
+ * @param alpha1 angle between center and intermediate point, in radians (output)
+ * @param alpha2 angle between center and final point, in radians (output)
  * @return TRUE if the points are not aligned and define an arc circle.
  *
  * @since GDAL 2.0

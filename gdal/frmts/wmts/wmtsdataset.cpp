@@ -49,7 +49,7 @@ extern "C" void GDALRegister_WMTS();
 
 #define WMTS_WGS84_DEG_PER_METER    (180 / M_PI / SRS_WGS84_SEMIMAJOR)
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 typedef enum
 {
@@ -719,6 +719,12 @@ int WMTSDataset::ReadTMS(CPLXMLNode* psContents,
             oTM.osIdentifier = l_pszIdentifier;
             oTM.dfScaleDenominator = CPLAtof(pszScaleDenominator);
             oTM.dfPixelSize = oTM.dfScaleDenominator * WMTS_PITCH;
+            if( oTM.dfPixelSize <= 0.0 )
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Invalid ScaleDenominator");
+                return FALSE;
+            }
             if( oTMS.oSRS.IsGeographic() )
                 oTM.dfPixelSize *= WMTS_WGS84_DEG_PER_METER;
             double dfVal1 = CPLAtof(pszTopLeftCorner);
@@ -738,8 +744,8 @@ int WMTSDataset::ReadTMS(CPLXMLNode* psContents,
             }
             oTM.nTileWidth = atoi(pszTileWidth);
             oTM.nTileHeight = atoi(pszTileHeight);
-            if( oTM.nTileWidth < 128 || oTM.nTileWidth > 4096 ||
-                oTM.nTileHeight < 128 || oTM.nTileHeight > 4096 )
+            if( oTM.nTileWidth <= 0 || oTM.nTileWidth > 4096 ||
+                oTM.nTileHeight <= 0 || oTM.nTileHeight > 4096 )
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
                          "Invalid TileWidth/TileHeight element");
@@ -1972,7 +1978,7 @@ GDALDataset* WMTSDataset::Open(GDALOpenInfo* poOpenInfo)
             const WMTSTileMatrix& oTM = oTMS.aoTM[i];
             int nRasterXSize = int(0.5 + poDS->nRasterXSize / oTM.dfPixelSize * poDS->adfGT[1]);
             int nRasterYSize = int(0.5 + poDS->nRasterYSize / oTM.dfPixelSize * poDS->adfGT[1]);
-            if( !poDS->apoDatasets.empty() && 
+            if( !poDS->apoDatasets.empty() &&
                 (nRasterXSize < 128 || nRasterYSize < 128) )
             {
                 break;
@@ -2221,7 +2227,7 @@ void GDALRegister_WMTS()
 
     poDriver->SetDescription( "WMTS" );
     poDriver->SetMetadataItem( GDAL_DCAP_RASTER, "YES" );
-    poDriver->SetMetadataItem( GDAL_DMD_LONGNAME, "OGC Web Mab Tile Service" );
+    poDriver->SetMetadataItem( GDAL_DMD_LONGNAME, "OGC Web Map Tile Service" );
     poDriver->SetMetadataItem( GDAL_DMD_HELPTOPIC, "frmt_wmts.html" );
 
     poDriver->SetMetadataItem( GDAL_DMD_CONNECTION_PREFIX, "WMTS:" );

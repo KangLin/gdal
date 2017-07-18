@@ -43,8 +43,17 @@
 #include "minidriver_mrf.h"
 
 #include <limits>
+#include <utility>
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
+
+//
+// A static map holding seen server GetTileService responses, per process
+// It makes opening and reopening rasters from the same server faster
+//
+GDALWMSDataset::StringMap_t GDALWMSDataset::cfg;
+CPLMutex *GDALWMSDataset::cfgmtx = NULL;
+
 
 /************************************************************************/
 /*              GDALWMSDatasetGetConfigFromURL()                        */
@@ -934,6 +943,49 @@ GDALDataset *GDALWMSDataset::Open(GDALOpenInfo *poOpenInfo)
 
     return ds;
 }
+
+/************************************************************************/
+/*                             GetServerConfig()                        */
+/************************************************************************/
+
+const char *GDALWMSDataset::GetServerConfig(const char *URI, char **papszHTTPOptions)
+{
+    CPLMutexHolder oHolder(&cfgmtx);
+
+    // Might have it cached already
+    if (cfg.end() != cfg.find(URI))
+        return cfg.find(URI)->second;
+
+    CPLHTTPResult *psResult = CPLHTTPFetch(URI, papszHTTPOptions);
+
+    if (NULL == psResult)
+        return NULL;
+
+    // Capture the result in buffer, get rid of http result
+    if ((psResult->nStatus == 0) && (NULL != psResult->pabyData) && ('\0' != psResult->pabyData[0]))
+        cfg.insert(make_pair(URI, static_cast<CPLString>(reinterpret_cast<const char *>(psResult->pabyData))));
+
+    CPLHTTPDestroyResult(psResult);
+
+    if (cfg.end() != cfg.find(URI))
+        return cfg.find(URI)->second;
+    else
+        return NULL;
+}
+
+// Empties the server configuration cache and removes the mutex
+void GDALWMSDataset::ClearConfigCache() {
+    // Obviously not thread safe, should only be called when no WMS files are being opened
+    cfg.clear();
+    DestroyCfgMutex();
+}
+
+void GDALWMSDataset::DestroyCfgMutex() {
+    if (cfgmtx)
+        CPLDestroyMutex(cfgmtx);
+    cfgmtx = NULL;
+}
+
 /************************************************************************/
 /*                             CreateCopy()                             */
 /************************************************************************/
@@ -972,13 +1024,17 @@ GDALDataset *GDALWMSDataset::CreateCopy( const char * pszFilename,
     return Open(&oOpenInfo);
 }
 
+void WMSDeregister(CPL_UNUSED GDALDriver *d) {
+    GDALWMSDataset::DestroyCfgMutex();
+}
+
 // Define a minidriver factory type, create one and register it
 #define RegisterMinidriver(name) \
     class WMSMiniDriverFactory_##name : public WMSMiniDriverFactory { \
     public: \
-        WMSMiniDriverFactory_##name() { m_name = CPLString(#name); };\
-        virtual ~WMSMiniDriverFactory_##name() {};\
-        virtual WMSMiniDriver* New() const override { return new WMSMiniDriver_##name;}; \
+        WMSMiniDriverFactory_##name() { m_name = CPLString(#name); }\
+        virtual ~WMSMiniDriverFactory_##name() {}\
+        virtual WMSMiniDriver* New() const override { return new WMSMiniDriver_##name;} \
     }; \
     WMSRegisterMiniDriverFactory(new WMSMiniDriverFactory_##name());
 
@@ -1014,7 +1070,7 @@ void GDALRegister_WMS()
 
     poDriver->pfnOpen = GDALWMSDataset::Open;
     poDriver->pfnIdentify = GDALWMSDataset::Identify;
-    poDriver->pfnUnloadDriver = WMSDeregisterMiniDrivers;
+    poDriver->pfnUnloadDriver = WMSDeregister;
     poDriver->pfnCreateCopy = GDALWMSDataset::CreateCopy;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);

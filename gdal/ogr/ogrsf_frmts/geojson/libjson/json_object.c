@@ -547,7 +547,8 @@ int64_t json_object_get_int64(struct json_object *jso)
   case json_type_boolean:
     return jso->o.c_boolean;
   case json_type_string:
-	if (json_parse_int64(jso->o.c_string.str, &cint) == 0) return cint;
+    if (json_parse_int64(jso->o.c_string.str, &cint) == 0) return cint;
+    /* FALLTHRU */
   default:
     return 0;
   }
@@ -564,7 +565,9 @@ static int json_object_double_to_json_string(struct json_object* jso,
   char buf[128], *p, *q;
   int size;
 
-  size = snprintf(buf, 128, "%f", jso->o.c_double);
+  size = snprintf(buf, sizeof(buf), "%f", jso->o.c_double);
+  if( size < 0 || size > (int)sizeof(buf) )
+      size = (int)sizeof(buf);
   p = strchr(buf, ',');
   if (p) {
     *p = '.';

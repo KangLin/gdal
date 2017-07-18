@@ -18,7 +18,7 @@
 * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *
-* Copyright 2014-2015 Esri
+* Portions copyright 2014-2017 Esri
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@
 *
 ******************************************************************************
 *
-*   Since the MRF dataset and the band are so closely tied together, they should be
+*   The MRF dataset and the band are closely tied together, they should be
 *   considered a single class, or a class (dataset) with extensions (bands).
 *
 *
@@ -56,7 +56,7 @@
 #include <algorithm>
 #include <vector>
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 using std::vector;
 using std::string;
@@ -74,13 +74,15 @@ GDALMRFDataset::GDALMRFDataset() :
     zslice(0),
     idxSize(0),
     clonedSource(FALSE),
-    bypass_cache(
-        BOOLTEST(CPLGetConfigOption("MRF_BYPASSCACHING", "FALSE"))),
+    nocopy(FALSE),
+    bypass_cache(BOOLTEST(CPLGetConfigOption("MRF_BYPASSCACHING", "FALSE"))),
     mp_safe(FALSE),
     hasVersions(FALSE),
     verCount(0),
-    bCrystalized(FALSE), // Assume not in create mode
+    bCrystalized(TRUE), // Assume not in create mode
     spacing(0),
+    no_errors(0),
+    missing(0),
     poSrcDS(NULL),
     level(-1),
     cds(NULL),
@@ -120,16 +122,42 @@ bool GDALMRFDataset::SetPBuffer(unsigned int sz)
     return true;
 }
 
+//
+// Called by dataset destructor or at GDAL termination, to avoid
+// closing datasets whose drivers have already been unloaded
+//
+int GDALMRFDataset::CloseDependentDatasets()
+{
+    int bHasDroppedRef = GDALPamDataset::CloseDependentDatasets();
+
+    if (poSrcDS)
+    {
+        bHasDroppedRef = TRUE;
+        GDALClose(reinterpret_cast<GDALDatasetH>(poSrcDS));
+        poSrcDS = NULL;
+    }
+
+    if (cds) {
+        bHasDroppedRef = TRUE;
+        GDALClose(reinterpret_cast<GDALDatasetH>(cds));
+        cds = NULL;
+    }
+
+    return bHasDroppedRef;
+}
+
 GDALMRFDataset::~GDALMRFDataset()
 
 {   // Make sure everything gets written
     FlushCache();
+
+    CloseDependentDatasets();
+
     if (ifp.FP)
         VSIFCloseL(ifp.FP);
     if (dfp.FP)
         VSIFCloseL(dfp.FP);
-    delete cds;
-    delete poSrcDS;
+
     delete poColorTable;
 
     // CPLFree ignores being called with NULL
@@ -178,10 +206,6 @@ CPLErr GDALMRFDataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff, int n
         nXOff, nYOff, nXSize, nYSize, nBufXSize, nBufYSize, nBandCount,
         static_cast<int>(nPixelSpace), static_cast<int>(nLineSpace),
         static_cast<int>(nBandSpace));
-
-    // Finish the Create call
-    if (!bCrystalized)
-        Crystalize();
 
     //
     // Call the parent implementation, which splits it into bands and calls their IRasterIO
@@ -446,6 +470,9 @@ void GDALMRFDataset::SetMaxValue(const char *pszVal) {
 int GDALMRFDataset::Identify(GDALOpenInfo *poOpenInfo)
 
 {
+  if (STARTS_WITH(poOpenInfo->pszFilename, "<MRF_META>"))
+        return TRUE;
+
     CPLString fn(poOpenInfo->pszFilename);
     if (fn.find(":MRF:") != string::npos)
         return TRUE;
@@ -541,7 +568,6 @@ GDALDataset *GDALMRFDataset::Open(GDALOpenInfo *poOpenInfo)
 
     // Different ways to open an MRF
     if (poOpenInfo->nHeaderBytes >= 10) {
-
         const char *pszHeader = reinterpret_cast<char *>(poOpenInfo->pabyHeader);
         if (STARTS_WITH(pszHeader, "<MRF_META>")) // Regular file name
             config = CPLParseXMLFile(pszFileName);
@@ -550,7 +576,7 @@ GDALDataset *GDALMRFDataset::Open(GDALOpenInfo *poOpenInfo)
             config = LERC_Band::GetMRFConfig(poOpenInfo);
 #endif
 
-    } 
+    }
     else {
         if (EQUALN(pszFileName, "<MRF_META>", 10)) // Content as file name
             config = CPLParseXMLString(pszFileName);
@@ -593,6 +619,9 @@ GDALDataset *GDALMRFDataset::Open(GDALOpenInfo *poOpenInfo)
     {
         ret = ds->Initialize(config);
     }
+
+    if (ret == CE_None)
+        ds->ProcessOpenOptions(poOpenInfo->papszOpenOptions);
 
     CPLDestroyXMLNode(config);
 
@@ -650,7 +679,7 @@ CPLErr GDALMRFDataset::LevelInit(const int l) {
         return CE_Failure;
     }
 
-    GDALMRFRasterBand *srcband = 
+    GDALMRFRasterBand *srcband =
         reinterpret_cast<GDALMRFRasterBand *>(cds->GetRasterBand(1)->GetOverview(l));
 
     // Copy the sizes from this level
@@ -720,6 +749,7 @@ static CPLErr Init_Raster(ILImage &image, GDALMRFDataset *ds, CPLXMLNode *defima
 
     // Basic checks
     if (!node || image.size.x < 1 || image.size.y < 1 ||
+        image.size.z < 0 || image.size.c < 0 ||
         !GDALCheckBandCount(image.size.c, FALSE)) {
         CPLError(CE_Failure, CPLE_AppDefined, "Raster size missing or invalid");
         return CE_Failure;
@@ -944,6 +974,10 @@ VSILFILE *GDALMRFDataset::IdxFP() {
     if (ifp.FP != NULL)
         return ifp.FP;
 
+    // If missing is set, we already checked, there is no index
+    if (missing)
+        return NULL;
+
     // If name starts with '(' it is not a real file name
     if (current.idxfname[0] == '(')
         return NULL;
@@ -957,6 +991,12 @@ VSILFILE *GDALMRFDataset::IdxFP() {
     }
 
     ifp.FP = VSIFOpenL(current.idxfname, mode);
+
+    // If file didn't open for reading and no_errors is set, just return null and make a note
+    if (ifp.FP == NULL && eAccess == GA_ReadOnly && no_errors) {
+        missing = 1;
+        return NULL;
+    }
 
     // need to create the index file
     if (ifp.FP == NULL && !bCrystalized && (eAccess == GA_Update || !source.empty())) {
@@ -1098,7 +1138,7 @@ io_error:
     CPLError(CE_Failure, CPLE_FileIO,
         "GDAL MRF: %s : %s", strerror(errno), current.datfname.c_str());
     return NULL;
-};
+}
 
 // Builds an XML tree from the current MRF.  If written to a file it becomes an MRF
 CPLXMLNode * GDALMRFDataset::BuildConfig()
@@ -1564,31 +1604,34 @@ GDALDataset *GDALMRFDataset::CreateCopy(const char *pszFilename,
 
     CSLDestroy(options);
 
-    char **meta = poSrcDS->GetMetadata();
-    if (poDS && CSLCount(meta))
-        poDS->SetMetadata(meta);
+    if (!poDS)
+      return NULL;
 
-    // Copy input GCPs, PAM handles it
-    if (poSrcDS->GetGCPCount())
-        poDS->SetGCPs(poSrcDS->GetGCPCount(), poSrcDS->GetGCPs(), poSrcDS->GetGCPProjection());
+    char** papszFileList = poDS->GetFileList();
+    poDS->oOvManager.Initialize(poDS, poDS->GetPhysicalFilename(), papszFileList);
+    CSLDestroy(papszFileList);
 
-    meta = poSrcDS->GetMetadata("RPC");
-    if (poDS && CSLCount(meta))
-        poDS->SetMetadata(meta, "RPC");
+    CPLErr err = CE_None;
+    // Have PAM copy all, but skip the mask
+    int nCloneFlags = GCIF_PAM_DEFAULT & ~GCIF_MASK;
 
     // If copy is disabled, we're done, we just created an empty MRF
-    if (!poDS || on(CSLFetchNameValue(papszOptions, "NOCOPY")))
-        return poDS;
-
-    // Use the GDAL copy call
-    // Need to flag the dataset as compressed (COMPRESSED=TRUE) to force block writes
-    // This might not be what we want, if the input and out order is truly separate
-    char **papszCWROptions = NULL;
-    papszCWROptions = CSLAddNameValue(papszCWROptions, "COMPRESSED", "TRUE");
-    CPLErr err = GDALDatasetCopyWholeRaster((GDALDatasetH)poSrcDS,
+    if (!on(CSLFetchNameValue(papszOptions, "NOCOPY"))) {
+      // Use the GDAL copy call
+      // Need to flag the dataset as compressed (COMPRESSED=TRUE) to force block writes
+      // This might not be what we want, if the input and out order is truly separate
+      nCloneFlags |= GCIF_MASK; // We do copy the data, so copy the mask too if necessary
+      char **papszCWROptions = NULL;
+      papszCWROptions = CSLAddNameValue(papszCWROptions, "COMPRESSED", "TRUE");
+      err = GDALDatasetCopyWholeRaster((GDALDatasetH)poSrcDS,
         (GDALDatasetH)poDS, papszCWROptions, pfnProgress, pProgressData);
 
-    CSLDestroy(papszCWROptions);
+      CSLDestroy(papszCWROptions);
+    }
+
+
+    if (CE_None == err)
+      err = poDS->CloneInfo(poSrcDS, nCloneFlags);
 
     if (CE_Failure == err) {
         delete poDS;
@@ -1596,6 +1639,14 @@ GDALDataset *GDALMRFDataset::CreateCopy(const char *pszFilename,
     }
 
     return poDS;
+}
+
+
+// Apply create options to the current dataset, only valid during creation
+void GDALMRFDataset::ProcessOpenOptions(char **papszOptions)
+{
+    CPLStringList opt(papszOptions, FALSE);
+    no_errors = opt.FetchBoolean("NOERRORS", FALSE);
 }
 
 // Apply create options to the current dataset, only valid during creation
@@ -1631,7 +1682,10 @@ void GDALMRFDataset::ProcessCreateOptions(char **papszOptions)
     img.nbo = opt.FetchBoolean("NETBYTEORDER", FALSE);
 
     val = opt.FetchNameValue("CACHEDSOURCE");
-    if (val) source = val;
+    if (val) {
+        source = val;
+        nocopy = opt.FetchBoolean("NOCOPY", FALSE);
+    }
 
     val = opt.FetchNameValue("UNIFORM_SCALE");
     if (val) scale = atoi(val);
@@ -1714,7 +1768,7 @@ GDALMRFDataset::Create(const char * pszName,
     img.nbo = FALSE;
 
     // Set the guard that tells us it needs saving before IO can take place
-    poDS->bCrystalized = 0;
+    poDS->bCrystalized = FALSE;
 
     // Process the options, anything that an MRF might take
 
@@ -1781,9 +1835,8 @@ void GDALMRFDataset::Crystalize()
     CPLXMLNode *config = BuildConfig();
     WriteConfig(config);
     CPLDestroyXMLNode(config);
-    if (!IdxFP() || !DataFP())
-        throw CPLString().Printf("MRF: Can't create file %s", strerror(errno));
-
+    if (!nocopy && (!IdxFP() || !DataFP()))
+        throw CPLString().Printf("MRF: %s", strerror(errno));
     bCrystalized = TRUE;
 }
 
@@ -1988,6 +2041,10 @@ CPLErr GDALMRFDataset::ReadTileIdx(ILIdx &tinfo, const ILSize &pos, const ILImag
 
 {
     VSILFILE *l_ifp = IdxFP();
+
+    // Initialize the tinfo structure, in case the files are missing
+    if (missing)
+      return CE_None;
 
     GIntBig offset = bias + IdxOffset(pos, img);
     if (l_ifp == NULL && img.comp == IL_NONE ) {

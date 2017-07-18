@@ -53,7 +53,7 @@
 #include "ogr_srs_api.h"
 #include "ogrsf_frmts.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                          GDALGridOptions                             */
@@ -135,9 +135,10 @@ static void PrintAlgorithmAndOptions( GDALGridAlgorithm eAlgorithm,
         case GGA_InverseDistanceToAPowerNearestNeighbor:
             printf( "Algorithm name: \"%s\".\n", szAlgNameInvDistNearestNeighbor );
             CPLprintf( "Options are "
-                        "\"power=%f:radius=%f"
+                        "\"power=%f:smoothing=%f:radius=%f"
                     ":max_points=%lu:min_points=%lu:nodata=%f\"\n",
                 ((GDALGridInverseDistanceToAPowerNearestNeighborOptions *)pOptions)->dfPower,
+                ((GDALGridInverseDistanceToAPowerNearestNeighborOptions *)pOptions)->dfSmoothing,
                 ((GDALGridInverseDistanceToAPowerNearestNeighborOptions *)pOptions)->dfRadius,
                 (unsigned long)((GDALGridInverseDistanceToAPowerNearestNeighborOptions *)pOptions)->nMaxPoints,
                 (unsigned long)((GDALGridInverseDistanceToAPowerNearestNeighborOptions *)pOptions)->nMinPoints,
@@ -964,7 +965,7 @@ GDALGridOptions *GDALGridOptionsNew(char** papszArgv, GDALGridOptionsForBinary* 
     int argc = CSLCount(papszArgv);
     for( int i = 0; papszArgv != NULL && i < argc; i++ )
     {
-        if( EQUAL(papszArgv[i],"-of") && i < argc-1 )
+        if( i < argc-1 && EQUAL(papszArgv[i],"-of") )
         {
             ++i;
             CPLFree(psOptions->pszFormat);
@@ -1005,65 +1006,65 @@ GDALGridOptions *GDALGridOptionsNew(char** papszArgv, GDALGridOptionsForBinary* 
             i++;
         }
 
-        else if( EQUAL(papszArgv[i],"-txe") && i+2 < argc )
+        else if( i+2 < argc && EQUAL(papszArgv[i],"-txe") )
         {
             psOptions->dfXMin = CPLAtof(papszArgv[++i]);
             psOptions->dfXMax = CPLAtof(papszArgv[++i]);
             psOptions->bIsXExtentSet = TRUE;
         }
 
-        else if( EQUAL(papszArgv[i],"-tye") && i+2 < argc )
+        else if( i+2 < argc && EQUAL(papszArgv[i],"-tye") )
         {
             psOptions->dfYMin = CPLAtof(papszArgv[++i]);
             psOptions->dfYMax = CPLAtof(papszArgv[++i]);
             psOptions->bIsYExtentSet = TRUE;
         }
 
-        else if( EQUAL(papszArgv[i],"-outsize") && i+2 < argc )
+        else if( i+2 < argc && EQUAL(papszArgv[i],"-outsize") )
         {
             psOptions->nXSize = atoi(papszArgv[++i]);
             psOptions->nYSize = atoi(papszArgv[++i]);
         }
 
-        else if( EQUAL(papszArgv[i],"-co") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-co") )
         {
             psOptions->papszCreateOptions = CSLAddString( psOptions->papszCreateOptions, papszArgv[++i] );
         }
 
-        else if( EQUAL(papszArgv[i],"-zfield") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-zfield") )
         {
             CPLFree(psOptions->pszBurnAttribute);
             psOptions->pszBurnAttribute = CPLStrdup(papszArgv[++i]);
         }
 
-        else if( EQUAL(papszArgv[i],"-z_increase") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-z_increase") )
         {
             psOptions->dfIncreaseBurnValue = CPLAtof(papszArgv[++i]);
         }
 
-        else if( EQUAL(papszArgv[i],"-z_multiply") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-z_multiply") )
         {
             psOptions->dfMultiplyBurnValue = CPLAtof(papszArgv[++i]);
         }
 
-        else if( EQUAL(papszArgv[i],"-where") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-where") )
         {
             CPLFree(psOptions->pszWHERE);
             psOptions->pszWHERE = CPLStrdup(papszArgv[++i]);
         }
 
-        else if( EQUAL(papszArgv[i],"-l") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-l") )
         {
             psOptions->papszLayers = CSLAddString( psOptions->papszLayers, papszArgv[++i] );
         }
 
-        else if( EQUAL(papszArgv[i],"-sql") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-sql") )
         {
             CPLFree(psOptions->pszSQL);
             psOptions->pszSQL = CPLStrdup(papszArgv[++i]);
         }
 
-        else if( EQUAL(papszArgv[i],"-spat") && i+4 < argc )
+        else if( i+4 < argc && EQUAL(papszArgv[i],"-spat") )
         {
             OGRLinearRing  oRing;
 
@@ -1135,26 +1136,26 @@ GDALGridOptions *GDALGridOptionsNew(char** papszArgv, GDALGridOptionsForBinary* 
                 i ++;
             }
         }
-        else if( EQUAL(papszArgv[i],"-clipsrcsql") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-clipsrcsql") )
         {
             CPLFree(psOptions->pszClipSrcSQL);
             psOptions->pszClipSrcSQL = CPLStrdup(papszArgv[i+1]);
             i ++;
         }
-        else if( EQUAL(papszArgv[i],"-clipsrclayer") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-clipsrclayer") )
         {
             CPLFree(psOptions->pszClipSrcLayer);
             psOptions->pszClipSrcLayer = CPLStrdup(papszArgv[i+1]);
             i ++;
         }
-        else if( EQUAL(papszArgv[i],"-clipsrcwhere") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-clipsrcwhere") )
         {
             CPLFree(psOptions->pszClipSrcWhere);
             psOptions->pszClipSrcWhere = CPLStrdup(papszArgv[i+1]);
             i ++;
         }
 
-        else if( EQUAL(papszArgv[i],"-a_srs") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-a_srs") )
         {
             OGRSpatialReference oOutputSRS;
 
@@ -1172,7 +1173,7 @@ GDALGridOptions *GDALGridOptionsNew(char** papszArgv, GDALGridOptionsForBinary* 
             i++;
         }
 
-        else if( EQUAL(papszArgv[i],"-a") && i+1 < argc )
+        else if( i+1 < argc && EQUAL(papszArgv[i],"-a") )
         {
             const char* pszAlgorithm = papszArgv[++i];
             CPLFree(psOptions->pOptions);

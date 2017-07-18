@@ -479,12 +479,18 @@ CreateTupleFromDoubleArray( int *first, unsigned int size ) {
     }
 
     if (safeLen) safeLen--;
+    if( safeLen > INT_MAX ) {
+      SWIG_exception( SWIG_RuntimeError, "too large buffer (>2GB)" );
+    }
     $1 = (int) safeLen;
   }
   else if (PyBytes_Check($input))
   {
     Py_ssize_t safeLen = 0;
     PyBytes_AsStringAndSize($input, (char**) &$2, &safeLen);
+    if( safeLen > INT_MAX ) {
+      SWIG_exception( SWIG_RuntimeError, "too large buffer (>2GB)" );
+    }
     $1 = (int) safeLen;
   }
   else
@@ -497,6 +503,9 @@ CreateTupleFromDoubleArray( int *first, unsigned int size ) {
   {
     Py_ssize_t safeLen = 0;
     PyString_AsStringAndSize($input, (char**) &$2, &safeLen);
+    if( safeLen > INT_MAX ) {
+      SWIG_exception( SWIG_RuntimeError, "too large buffer (>2GB)" );
+    }
     $1 = (int) safeLen;
   }
   else
@@ -1284,6 +1293,17 @@ static PyObject *XMLTreeToPyList( CPLXMLNode *psTree )
 {
     /* %typemap(in) (GDALProgressFunc callback = NULL) */
     /* callback_func typemap */
+
+    /* In some cases 0 is passed instead of None. */
+    /* See https://github.com/OSGeo/gdal/pull/219 */
+    if ( PyLong_Check($input) || PyInt_Check($input) )
+    {
+        if( PyLong_AsLong($input) == 0 )
+        {
+            $input = Py_None;
+        }
+    }
+
     if ($input && $input != Py_None ) {
         void* cbfunction = NULL;
         CPL_IGNORE_RET_VAL(SWIG_ConvertPtr( $input,
@@ -1820,7 +1840,10 @@ DecomposeSequenceOfCoordinates( PyObject *seq, int nCount, double *x, double *y,
   if (result == 0)
     $result = SWIG_NewPointerObj((void*)new_StatBuf( $1 ),SWIGTYPE_p_StatBuf,1);
   else
+  {
     $result = Py_None;
+    Py_INCREF($result);
+  }
 }
 
 %typemap(in,numinputs=0) (void** pptr, size_t* pnsize, GDALDataType* pdatatype, int* preadonly) (void* ptr, size_t nsize, GDALDataType datatype, int readonly)

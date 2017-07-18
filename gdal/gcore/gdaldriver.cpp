@@ -45,7 +45,7 @@
 #include "ogr_core.h"
 #include "ogrsf_frmts.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 CPL_C_START
 // TODO(schwehr): Why is this not in a header?
@@ -693,6 +693,8 @@ GDALDataset *GDALDriver::DefaultCreateCopy( const char * pszFilename,
  * If the driver doesn't implement CreateCopy(), but does implement Create()
  * then the default CreateCopy() mechanism built on calling Create() will
  * be used.
+ * So to test if CreateCopy() is available, you can test if GDAL_DCAP_CREATECOPY
+ * or GDAL_DCAP_CREATE is set in the GDAL metadata.
  *
  * It is intended that CreateCopy() will often be used with a source dataset
  * which is a virtual dataset allowing configuration of band types, and other
@@ -1003,13 +1005,14 @@ CPLErr GDALDriver::Delete( const char * pszFilename )
         CPLError( CE_Failure, CPLE_NotSupported,
                   "Unable to determine files associated with %s, "
                   "delete fails.", pszFilename );
-
+        CSLDestroy( papszFileList );
         return CE_Failure;
     }
 
 /* -------------------------------------------------------------------- */
 /*      Delete all files.                                               */
 /* -------------------------------------------------------------------- */
+    CPLErr eErr = CE_None;
     for( int i = 0; papszFileList[i] != NULL; ++i )
     {
         if( VSIUnlink( papszFileList[i] ) != 0 )
@@ -1018,14 +1021,13 @@ CPLErr GDALDriver::Delete( const char * pszFilename )
                       "Deleting %s failed:\n%s",
                       papszFileList[i],
                       VSIStrerror(errno) );
-            CSLDestroy( papszFileList );
-            return CE_Failure;
+            eErr = CE_Failure;
         }
     }
 
     CSLDestroy( papszFileList );
 
-    return CE_None;
+    return eErr;
 }
 
 /************************************************************************/

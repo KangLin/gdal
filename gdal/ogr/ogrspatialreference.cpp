@@ -35,6 +35,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 
 #include "cpl_atomic_ops.h"
@@ -49,7 +50,7 @@
 #include "ogr_p.h"
 #include "ogr_srs_api.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 // The current opinion is that WKT longitudes like central meridian
 // should be relative to Greenwich, not the prime meridian in use.
@@ -180,8 +181,7 @@ OGRSpatialReference::OGRSpatialReference(const OGRSpatialReference &oOther) :
 OGRSpatialReference::~OGRSpatialReference()
 
 {
-    if( poRoot != NULL )
-        delete poRoot;
+    delete poRoot;
 }
 
 /************************************************************************/
@@ -240,9 +240,7 @@ void CPL_STDCALL OSRDestroySpatialReference( OGRSpatialReferenceH hSRS )
 void OGRSpatialReference::Clear()
 
 {
-    if( poRoot )
-        delete poRoot;
-
+    delete poRoot;
     poRoot = NULL;
 
     bNormInfoSet = FALSE;
@@ -421,9 +419,7 @@ void OSRRelease( OGRSpatialReferenceH hSRS )
 void OGRSpatialReference::SetRoot( OGR_SRSNode * poNewRoot )
 
 {
-    if( poRoot != NULL )
-        delete poRoot;
-
+    delete poRoot;
     poRoot = poNewRoot;
 }
 
@@ -782,7 +778,7 @@ OGRErr OGRSpatialReference::importFromWkt( char ** ppszInput )
         return poNewChild->importFromWkt( ppszInput );
     }
 
-    return eErr;  // TODO(schwehr): Always OGRERR_NONE.
+    return OGRERR_NONE;
 }
 
 /************************************************************************/
@@ -1246,6 +1242,9 @@ OGRErr OGRSpatialReference::SetTargetLinearUnits( const char *pszTargetKey,
                                                   double dfInMeters )
 
 {
+    if( dfInMeters <= 0.0 )
+        return OGRERR_FAILURE;
+
     bNormInfoSet = FALSE;
 
     OGR_SRSNode *poCS = NULL;
@@ -1267,7 +1266,9 @@ OGRErr OGRSpatialReference::SetTargetLinearUnits( const char *pszTargetKey,
         return OGRERR_FAILURE;
 
     char szValue[128] = { '\0' };
-    if( dfInMeters == static_cast<int>(dfInMeters) )
+    if( dfInMeters < std::numeric_limits<int>::max() &&
+        dfInMeters > std::numeric_limits<int>::min() &&
+        dfInMeters == static_cast<int>(dfInMeters) )
         snprintf( szValue, sizeof(szValue),
                   "%d", static_cast<int>(dfInMeters) );
     else
@@ -2142,6 +2143,7 @@ OGRErr OGRSpatialReference::SetFromUserInput( const char * pszDefinition )
 /* -------------------------------------------------------------------- */
 /*      Try to open it as a file.                                       */
 /* -------------------------------------------------------------------- */
+    CPLConfigOptionSetter oSetter("CPL_ALLOW_VSISTDIN", "NO", true);
     VSILFILE * const fp = VSIFOpenL( pszDefinition, "rt" );
     if( fp == NULL )
         return OGRERR_CORRUPT_DATA;
@@ -2437,11 +2439,7 @@ OGRErr OGRSpatialReference::importFromURN( const char *pszURN )
 /* -------------------------------------------------------------------- */
 /*      Clear any existing definition.                                  */
 /* -------------------------------------------------------------------- */
-    if( GetRoot() != NULL )
-    {
-        delete poRoot;
-        poRoot = NULL;
-    }
+    Clear();
 
 /* -------------------------------------------------------------------- */
 /*      Find code (ignoring version) out of string like:                */
@@ -2580,14 +2578,16 @@ OGRErr OGRSpatialReference::importFromCRSURL( const char *pszURL )
         return OGRERR_FAILURE;
     }
 
+    if( *pszCur == '\0' )
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "URL %s malformed.", pszURL);
+        return OGRERR_FAILURE;
+    }
+
 /* -------------------------------------------------------------------- */
 /*      Clear any existing definition.                                  */
 /* -------------------------------------------------------------------- */
-    if( GetRoot() != NULL )
-    {
-        delete poRoot;
-        poRoot = NULL;
-    }
+    Clear();
 
     if( STARTS_WITH_CI(pszCur, "-compound?1=") )
     {

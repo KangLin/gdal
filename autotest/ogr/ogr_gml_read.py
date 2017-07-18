@@ -528,22 +528,25 @@ def ogr_gml_13():
     if not gdaltest.have_gml_reader:
         return 'skip'
 
-    ds = ogr.Open('data/testlistfields.gml')
-    lyr = ds.GetLayer(0)
-    feat = lyr.GetNextFeature()
-    if feat.GetFieldAsStringList(feat.GetFieldIndex('attrib1')) != ['value1','value2']:
-        gdaltest.post_reason('did not get expected value for attrib1')
-        return 'fail'
-    if feat.GetField(feat.GetFieldIndex('attrib2')) != 'value3':
-        gdaltest.post_reason('did not get expected value for attrib2')
-        return 'fail'
-    if feat.GetFieldAsIntegerList(feat.GetFieldIndex('attrib3')) != [4,5]:
-        gdaltest.post_reason('did not get expected value for attrib3')
-        return 'fail'
-    if feat.GetFieldAsDoubleList(feat.GetFieldIndex('attrib4')) != [6.1,7.1]:
-        gdaltest.post_reason('did not get expected value for attrib4')
-        return 'fail'
-    ds = None
+    for i in range(2):
+        ds = ogr.Open('data/testlistfields.gml')
+        lyr = ds.GetLayer(0)
+        feat = lyr.GetNextFeature()
+        if feat.GetFieldAsStringList(feat.GetFieldIndex('attrib1')) != ['value1','value2']:
+            gdaltest.post_reason('did not get expected value for attrib1')
+            return 'fail'
+        if feat.GetField(feat.GetFieldIndex('attrib2')) != 'value3':
+            gdaltest.post_reason('did not get expected value for attrib2')
+            return 'fail'
+        if feat.GetFieldAsIntegerList(feat.GetFieldIndex('attrib3')) != [4,5]:
+            gdaltest.post_reason('did not get expected value for attrib3')
+            return 'fail'
+        if feat.GetFieldAsDoubleList(feat.GetFieldIndex('attrib4')) != [6.1,7.1]:
+            gdaltest.post_reason('did not get expected value for attrib4')
+            return 'fail'
+        ds = None
+    gdal.Unlink('data/testlistfields.gfs')
+
     return 'success'
 
 ###############################################################################
@@ -1383,7 +1386,7 @@ def ogr_gml_34():
     ds = None
 
     gdal.Unlink( '/vsimem/ogr_gml_34.gml' )
-    gdal.Unlink( '/vsimem/ogr_gml_34.gfs' )
+    gdal.Unlink( '/vsimem/ogr_gml_34.xsd' )
 
     return 'success'
 
@@ -3792,6 +3795,7 @@ def ogr_gml_72():
 
     gdal.Unlink("/vsimem/ogr_gml_72.gml")
     gdal.Unlink("/vsimem/ogr_gml_72.xsd")
+    gdal.Unlink("/vsimem/ogr_gml_72.gfs")
 
     ds = ogr.GetDriverByName('GML').CreateDataSource('/vsimem/ogr_gml_72.gml')
     ds.SetMetadata({'NAME': 'name', 'DESCRIPTION': 'description' })
@@ -3806,6 +3810,7 @@ def ogr_gml_72():
 
     gdal.Unlink("/vsimem/ogr_gml_72.gml")
     gdal.Unlink("/vsimem/ogr_gml_72.xsd")
+    gdal.Unlink("/vsimem/ogr_gml_72.gfs")
 
     return 'success'
 
@@ -4082,6 +4087,59 @@ def ogr_gml_79():
     return 'success'
 
 ###############################################################################
+# Test null / unset
+
+def ogr_gml_80():
+
+    if not gdaltest.have_gml_reader:
+        return 'skip'
+
+    ds = ogr.GetDriverByName('GML').CreateDataSource('/vsimem/ogr_gml_80.xml')
+    lyr = ds.CreateLayer('test', geom_type = ogr.wkbNone)
+    lyr.CreateField( ogr.FieldDefn('int_field', ogr.OFTInteger) )
+
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f['int_field'] = 4
+    lyr.CreateFeature(f)
+
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetFieldNull('int_field')
+    lyr.CreateFeature(f)
+
+    f = ogr.Feature(lyr.GetLayerDefn())
+    lyr.CreateFeature(f)
+    f = None
+    ds = None
+
+    ds = ogr.Open('/vsimem/ogr_gml_80.xml')
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    if f['int_field'] != 4:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+
+    f = lyr.GetNextFeature()
+    if f['int_field'] != None:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+
+    f = lyr.GetNextFeature()
+    if f.IsFieldSet('int_field'):
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    f = None
+    ds = None
+
+    gdal.Unlink('/vsimem/ogr_gml_80.xml')
+    gdal.Unlink('/vsimem/ogr_gml_80.xsd')
+
+    return 'success'
+
+
+###############################################################################
 #  Cleanup
 
 def ogr_gml_cleanup():
@@ -4092,6 +4150,10 @@ def ogr_gml_cleanup():
     gdal.SetConfigOption( 'GML_SAVE_RESOLVED_TO', None )
 
     gdaltest.clean_tmp()
+
+    fl = gdal.ReadDir('/vsimem/')
+    if fl is not None:
+        print(fl)
 
     return ogr_gml_clean_files()
 
@@ -4292,6 +4354,7 @@ gdaltest_list = [
     ogr_gml_77,
     ogr_gml_78,
     ogr_gml_79,
+    ogr_gml_80,
     ogr_gml_cleanup ]
 
 disabled_gdaltest_list = [

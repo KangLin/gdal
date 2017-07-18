@@ -39,7 +39,7 @@
 
 /*! @cond Doxygen_Suppress */
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                            VRTDataset()                             */
@@ -184,7 +184,10 @@ char** VRTDataset::GetMetadata( const char *pszDomain )
         /* ------------------------------------------------------------------ */
         /*      Convert tree to a single block of XML text.                   */
         /* ------------------------------------------------------------------ */
-        char *l_pszVRTPath = CPLStrdup(CPLGetPath(GetDescription()));
+        const char* pszDescription = GetDescription();
+        char *l_pszVRTPath = CPLStrdup(
+            pszDescription[0] && !STARTS_WITH(pszDescription, "<VRTDataset") ?
+                CPLGetPath(pszDescription): "" );
         CPLXMLNode *psDSTree = SerializeToXML( l_pszVRTPath );
         char *pszXML = CPLSerializeXMLTree( psDSTree );
 
@@ -285,6 +288,11 @@ CPLXMLNode *VRTDataset::SerializeToXML( const char *pszVRTPathIn )
     /* -------------------------------------------------------------------- */
     /*      Serialize bands.                                                */
     /* -------------------------------------------------------------------- */
+    CPLXMLNode* psLastChild = psDSTree->psChild;
+    for( ; psLastChild != NULL && psLastChild->psNext;
+                                    psLastChild = psLastChild->psNext )
+    {
+    }
     for( int iBand = 0; iBand < nBands; iBand++ )
     {
         CPLXMLNode *psBandTree =
@@ -292,7 +300,17 @@ CPLXMLNode *VRTDataset::SerializeToXML( const char *pszVRTPathIn )
                 papoBands[iBand])->SerializeToXML( pszVRTPathIn );
 
         if( psBandTree != NULL )
-            CPLAddXMLChild( psDSTree, psBandTree );
+        {
+            if( psLastChild == NULL )
+            {
+                CPLAddXMLChild( psDSTree, psBandTree );
+            }
+            else
+            {
+                psLastChild->psNext = psBandTree;
+            }
+            psLastChild = psBandTree;
+        }
     }
 
     /* -------------------------------------------------------------------- */
@@ -436,7 +454,7 @@ CPLErr VRTDataset::XMLInit( CPLXMLNode *psTree, const char *pszVRTPathIn )
                           pszSubclass );
 
             if( poBand != NULL
-                && poBand->XMLInit( psChild, pszVRTPathIn ) == CE_None )
+                && poBand->XMLInit( psChild, pszVRTPathIn, this ) == CE_None )
             {
                 SetMaskBand(poBand);
                 break;
@@ -481,7 +499,7 @@ CPLErr VRTDataset::XMLInit( CPLXMLNode *psTree, const char *pszVRTPathIn )
                           pszSubclass );
 
             if( poBand != NULL
-                && poBand->XMLInit( psChild, pszVRTPathIn ) == CE_None )
+                && poBand->XMLInit( psChild, pszVRTPathIn, this ) == CE_None )
             {
                 SetBand( ++l_nBands, poBand );
             }

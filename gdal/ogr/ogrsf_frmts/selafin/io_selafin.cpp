@@ -32,7 +32,7 @@
 #include "cpl_error.h"
 #include "cpl_quad_tree.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 namespace Selafin {
 
@@ -308,18 +308,16 @@ namespace Selafin {
             return 0;
         };
         if (!bDiscard) {
-            nData=0;
-            for (size_t i=0;i<4;++i) nData=(nData*0x100)+anb[i];
+            memcpy(&nData, anb, 4);
+            CPL_MSBPTR32(&nData);
         }
         return 1;
     }
 
     int write_integer(VSILFILE *fp,int nData) {
         unsigned char anb[4];
-        for (int i=3;i>=0;--i) {
-            anb[i]=nData%0x100;
-            nData/=0x100;
-        }
+        CPL_MSBPTR32(&nData);
+        memcpy(anb, &nData, 4);
         if (VSIFWriteL(anb,1,4,fp)<4) {
             CPLError(CE_Failure,CPLE_FileIO,"%s",SELAFIN_ERROR_MESSAGE);
             return 0;
@@ -327,10 +325,10 @@ namespace Selafin {
         return 1;
     }
 
-    int read_string(VSILFILE *fp,char *&pszData,bool bDiscard) {
+    int read_string(VSILFILE *fp,char *&pszData,int nFileSize,bool bDiscard) {
         int nLength=0;
         read_integer(fp,nLength);
-        if (nLength<=0 || nLength+1<=0) {
+        if (nLength<=0 || nLength == INT_MAX || nLength > nFileSize) {
             CPLError(CE_Failure,CPLE_FileIO,"%s",SELAFIN_ERROR_MESSAGE);
             return 0;
         }
@@ -341,14 +339,22 @@ namespace Selafin {
             }
         }
         else {
-            pszData=(char*)CPLMalloc(sizeof(char)*(nLength+1));
+            pszData=(char*)VSI_MALLOC_VERBOSE(nLength+1);
+            if( pszData == NULL )
+            {
+                return 0;
+            }
             if ((int)VSIFReadL(pszData,1,nLength,fp)<(int)nLength) {
                 CPLError(CE_Failure,CPLE_FileIO,"%s",SELAFIN_ERROR_MESSAGE);
+                VSIFree(pszData);
+                pszData = NULL;
                 return 0;
             }
             pszData[nLength]=0;
             if (VSIFSeekL(fp,4,SEEK_CUR)!=0) {
                 CPLError(CE_Failure,CPLE_FileIO,"%s",SELAFIN_ERROR_MESSAGE);
+                VSIFree(pszData);
+                pszData = NULL;
                 return 0;
             }
         }
@@ -369,6 +375,7 @@ namespace Selafin {
     int read_intarray(VSILFILE *fp,int *&panData,bool bDiscard) {
         int nLength=0;
         read_integer(fp,nLength);
+        panData = NULL;
         if (nLength<0 || nLength+1<=0) {
             CPLError(CE_Failure,CPLE_FileIO,"%s",SELAFIN_ERROR_MESSAGE);
             return -1;
@@ -386,11 +393,13 @@ namespace Selafin {
             }
             for (int i=0;i<nLength/4;++i) if (read_integer(fp,panData[i])==0) {
                 CPLFree(panData);
+                panData = NULL;
                 CPLError(CE_Failure,CPLE_FileIO,"%s",SELAFIN_ERROR_MESSAGE);
                 return -1;
             }
             if (VSIFSeekL(fp,4,SEEK_CUR)!=0) {
                 CPLFree(panData);
+                panData = NULL;
                 CPLError(CE_Failure,CPLE_FileIO,"%s",SELAFIN_ERROR_MESSAGE);
                 return -1;
             }
@@ -489,7 +498,7 @@ namespace Selafin {
         poHeader->pszFilename=CPLStrdup(pszFilename);
         int *panTemp = NULL;
         // Read the title
-        int nLength = read_string(fp,poHeader->pszTitle);
+        int nLength = read_string(fp,poHeader->pszTitle,nFileSize);
         if (nLength==0) {
             delete poHeader;
             return NULL;
@@ -505,14 +514,29 @@ namespace Selafin {
         poHeader->anUnused[0]=panTemp[1];
         CPLFree(panTemp);
         if (poHeader->nVar<0) {
+            poHeader->nVar = 0;
+            delete poHeader;
+            return NULL;
+        }
+        if( poHeader->nVar > 1000000 &&
+            nFileSize / static_cast<int>(sizeof(int)) < poHeader->nVar)
+        {
+            poHeader->nVar = 0;
             delete poHeader;
             return NULL;
         }
         // For each variable, read its name as a string of 32 characters
         poHeader->papszVariables=(char**)VSI_MALLOC2_VERBOSE(sizeof(char*),poHeader->nVar);
+        if( poHeader->nVar > 0 && poHeader->papszVariables == NULL )
+        {
+            poHeader->nVar = 0;
+            delete poHeader;
+            return NULL;
+        }
         for (int i=0;i<poHeader->nVar;++i) {
-            nLength=read_string(fp,poHeader->papszVariables[i]);
+            nLength=read_string(fp,poHeader->papszVariables[i],nFileSize);
             if (nLength==0) {
+                poHeader->nVar = i;
                 delete poHeader;
                 return NULL;
             }

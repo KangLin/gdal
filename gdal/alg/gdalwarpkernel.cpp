@@ -71,7 +71,7 @@
 
 #endif
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 static const double BAND_DENSITY_THRESHOLD = 0.0000000001;
 static const float SRC_DENSITY_THRESHOLD =  0.000000001f;
@@ -1065,6 +1065,16 @@ CPLErr GDALWarpKernel::PerformWarp()
         if( fabs(dfYReciprocalScale-nYReciprocalScale) < 0.05 )
             dfYScale = 1.0 / nYReciprocalScale;
     }
+
+    // XSCALE and YSCALE undocumented for now. Can help in some cases.
+    // Best would probably be a per-pixel scale computation.
+    const char* pszXScale = CSLFetchNameValue(papszWarpOptions, "XSCALE");
+    if( pszXScale != NULL )
+        dfXScale = CPLAtof(pszXScale);
+    const char* pszYScale = CSLFetchNameValue(papszWarpOptions, "YSCALE");
+    if( pszYScale != NULL )
+        dfYScale = CPLAtof(pszYScale);
+
 #if DEBUG_VERBOSE
     CPLDebug("WARP", "dfXScale = %f, dfYScale = %f", dfXScale, dfYScale);
 #endif
@@ -3595,8 +3605,8 @@ static bool GWKResampleOptimizedLanczos( GDALWarpKernel *poWK, int iBand,
                                             padfCst[(i + 3) % 3] / (dfX * dfX);
 #if DEBUG_VERBOSE
                 // TODO(schwehr): AlmostEqual.
-                CPLAssert(fabs(padfWeightsX[i-poWK->nFiltInitX] -
-                               GWKLanczosSinc(dfX, 3.0)) < 1e-10);
+                //CPLAssert(fabs(padfWeightsX[i-poWK->nFiltInitX] -
+                //               GWKLanczosSinc(dfX, 3.0)) < 1e-10);
 #endif
             }
 
@@ -3655,8 +3665,8 @@ static bool GWKResampleOptimizedLanczos( GDALWarpKernel *poWK, int iBand,
                                             padfCst[(j + 3) % 3] / (dfY * dfY);
 #if DEBUG_VERBOSE
                 // TODO(schwehr): AlmostEqual.
-                CPLAssert(fabs(padfWeightsY[j-poWK->nFiltInitY] -
-                               GWKLanczosSinc(dfY, 3.0)) < 1e-10);
+                //CPLAssert(fabs(padfWeightsY[j-poWK->nFiltInitY] -
+                //               GWKLanczosSinc(dfY, 3.0)) < 1e-10);
 #endif
             }
 
@@ -4649,6 +4659,18 @@ static CPL_INLINE bool GWKCheckAndComputeSrcOffsets(
 {
     if( !_pabSuccess[_iDstX] )
         return false;
+
+    // If this happens this is likely the symptom of a bug somewhere.
+    if( CPLIsNan(_padfX[_iDstX]) || CPLIsNan(_padfY[_iDstX]) )
+    {
+        static bool bNanCoordFound = false;
+        if( !bNanCoordFound )
+        {
+            CPLDebug("WARP", "NaN coordinate found.");
+            bNanCoordFound = true;
+        }
+        return false;
+    }
 
 /* -------------------------------------------------------------------- */
 /*      Figure out what pixel we want in our source raster, and skip    */

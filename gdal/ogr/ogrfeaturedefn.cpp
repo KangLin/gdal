@@ -40,7 +40,7 @@
 #include "ogr_p.h"
 #include "ograpispy.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                           OGRFeatureDefn()                           */
@@ -608,7 +608,7 @@ int OGR_FD_GetGeomFieldCount( OGRFeatureDefnH hDefn )
         OGRAPISpy_FD_GetGeomFieldCount(hDefn);
 #endif
 
-    return ((OGRFeatureDefn *) hDefn)->GetGeomFieldCount();
+    return reinterpret_cast<OGRFeatureDefn *>(hDefn)->GetGeomFieldCount();
 }
 
 /************************************************************************/

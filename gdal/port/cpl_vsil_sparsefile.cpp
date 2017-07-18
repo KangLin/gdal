@@ -51,7 +51,7 @@
 #include "cpl_string.h"
 #include "cpl_vsi_virtual.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 class SFRegion {
 public:
@@ -358,7 +358,8 @@ VSISparseFileFilesystemHandler::Open( const char *pszFilename,
                                       bool /* bSetError */ )
 
 {
-    CPLAssert( STARTS_WITH_CI(pszFilename, "/vsisparse/") );
+    if( !STARTS_WITH_CI(pszFilename, "/vsisparse/") )
+        return NULL;
 
     if( !EQUAL(pszAccess, "r") && !EQUAL(pszAccess, "rb") )
     {

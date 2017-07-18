@@ -31,7 +31,7 @@
 #include "cpl_time.h"
 #include <map>
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 #ifndef STARTS_WITH_CI
 #define STARTS_WITH(a,b)               (strncmp(a,b,strlen(b)) == 0)
@@ -343,7 +343,7 @@ void OGRIDFDataSource::Parse()
 
     // Patch Link geometries with the intermediate points of LinkCoordinate
     OGRLayer* poLinkLyr = m_poMemDS->GetLayerByName("Link");
-    if( poLinkLyr )
+    if( poLinkLyr && poLinkLyr->GetLayerDefn()->GetGeomFieldCount() )
     {
         iLinkID = poLinkLyr->GetLayerDefn()->GetFieldIndex("LINK_ID");
         if( iLinkID >= 0 )
@@ -575,7 +575,7 @@ void OGRVDVDataSource::DetectLayers()
                         poLayer->SetFeatureCount(nFeatureCount);
                     poLayer = NULL;
                     nFeatureCount = 0;
-                    nStartOffset = VSIFTellL(m_fpL) - nRead + i - 4 + 1;
+                    nStartOffset = VSIFTellL(m_fpL) + i + 1 - nRead - 4;
                     bInTableName = true;
                     osTableName.resize(0);
                     chNextExpected = 0;
@@ -1228,7 +1228,7 @@ OGRErr OGRVDVWriterLayer::ICreateFeature(OGRFeature* poFeature)
     {
         if( i > 0)
             bOK &= VSIFPrintfL(m_fpL, "; ") > 0;
-        if( poFeature->IsFieldSet(i) )
+        if( poFeature->IsFieldSetAndNotNull(i) )
         {
             const OGRFieldType eType = m_poFeatureDefn->GetFieldDefn(i)->GetType();
             if( eType == OFTInteger || eType == OFTInteger64 )

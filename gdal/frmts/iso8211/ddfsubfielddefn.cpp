@@ -40,7 +40,7 @@
 #include "cpl_error.h"
 #include "cpl_string.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                          DDFSubfieldDefn()                           */
@@ -145,6 +145,9 @@ int DDFSubfieldDefn::SetFormat( const char * pszFormat )
       case 'b':
         // Is the width expressed in bits? (is it a bitstring)
         bIsVariable = FALSE;
+        if( pszFormatString[1] == '\0' )
+            return FALSE;
+
         if( pszFormatString[1] == '(' )
         {
             nFormatWidth = atoi(pszFormatString+2);
@@ -476,6 +479,12 @@ DDFSubfieldDefn::ExtractFloatData( const char * pachSourceData,
                         "Attempt to extract float subfield %s with format %s\n"
                         "failed as only %d bytes available.  Using zero.",
                         pszName, pszFormatString, nMaxBytes );
+              return 0;
+          }
+          if( nFormatWidth > static_cast<int>(sizeof(abyData)) )
+          {
+              CPLError( CE_Failure, CPLE_AppDefined,
+                        "Format width %d too large", nFormatWidth );
               return 0;
           }
 
@@ -952,7 +961,7 @@ int DDFSubfieldDefn::FormatIntValue( char *pachData, int nBytesAvailable,
                     iOut = i;
 
                 pachData[iOut] = (char)((nNewValue & nMask) >> (i*8));
-                nMask *= 256;
+                nMask <<= 8;
             }
             break;
 

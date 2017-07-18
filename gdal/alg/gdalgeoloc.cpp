@@ -45,7 +45,7 @@
 #include "gdal.h"
 #include "gdal_priv.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 CPL_C_START
 CPLXMLNode *GDALSerializeGeoLocTransformer( void *pTransformArg );
@@ -332,6 +332,8 @@ static bool GeoLocGenerateBackMap( GDALGeoLocTransformInfo *psTransform )
             if( iBMX < 0 || iBMY < 0 || iBMX >= nBMXSize || iBMY >= nBMYSize )
                 continue;
 
+            // This narrowing conversion is unlikely to be out of range unless
+            // dfLINE_STEP and dfLINE_OFFSET take on extreme values.
             psTransform->pafBackMapX[iBMX + iBMY * nBMXSize] =
                 static_cast<float>(
                     iX * psTransform->dfPIXEL_STEP +
@@ -578,6 +580,7 @@ void *GDALCreateGeoLocTransformer( GDALDatasetH hBaseDS,
                                                "X_DATASET" );
     if( pszDSName != NULL )
     {
+        CPLConfigOptionSetter oSetter("CPL_ALLOW_VSISTDIN", "NO", true);
         psTransform->hDS_X = GDALOpenShared( pszDSName, GA_ReadOnly );
     }
     else
@@ -596,6 +599,7 @@ void *GDALCreateGeoLocTransformer( GDALDatasetH hBaseDS,
     pszDSName = CSLFetchNameValue( papszGeolocationInfo, "Y_DATASET" );
     if( pszDSName != NULL )
     {
+        CPLConfigOptionSetter oSetter("CPL_ALLOW_VSISTDIN", "NO", true);
         psTransform->hDS_Y = GDALOpenShared( pszDSName, GA_ReadOnly );
     }
     else

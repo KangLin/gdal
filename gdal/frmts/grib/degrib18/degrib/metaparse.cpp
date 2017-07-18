@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <limits>
 #include "clock.h"
 #include "meta.h"
 #include "metaname.h"
@@ -852,6 +853,11 @@ static int ParseSect3 (sInt4 *is3, sInt4 ns3, grib_MetaData *meta)
          meta->gds.Dx = is3[63] * unit; /* degrees. */
          if (is3[12] == GS3_GAUSSIAN_LATLON) {
             int np = is3[67]; /* parallels between a pole and the equator */
+            if( np == 0 )
+            {
+                errSprintf ("Gaussian Lat/Lon grid is not defined completely.\n");
+                return -2;
+            }
             meta->gds.Dy = 90.0 / np;
          } else
             meta->gds.Dy = is3[67] * unit; /* degrees. */
@@ -1176,7 +1182,7 @@ static int ParseSect4 (sInt4 *is4, sInt4 ns4, grib_MetaData *meta)
    }
    meta->pds2.sect4.templat = (unsigned short int) is4[7];
 
-   /* 
+   /*
     * Handle variables common to the supported templates.
     */
    if (ns4 < 34) {
@@ -1201,6 +1207,9 @@ static int ParseSect4 (sInt4 *is4, sInt4 ns4, grib_MetaData *meta)
                                         meta->pds2.sect4.numBands *
                                         sizeof (sect4_BandType));
       for (i = 0; i < meta->pds2.sect4.numBands; i++) {
+         if (ns4 < 20 + 10 * i + 1) {
+             return -1;
+         }
          meta->pds2.sect4.bands[i].series =
                (unsigned short int) is4[14 + 10 * i];
          meta->pds2.sect4.bands[i].numbers =
@@ -1869,7 +1878,16 @@ int MetaParse (grib_MetaData *meta, sInt4 *is0, sInt4 ns0,
       }
       sndSurfType = meta->pds2.sect4.sndSurfType;
       scale = meta->pds2.sect4.sndSurfScale;
-      value = static_cast<int>(meta->pds2.sect4.sndSurfValue);
+      if (meta->pds2.sect4.sndSurfValue < std::numeric_limits<int>::max() &&
+          meta->pds2.sect4.sndSurfValue > std::numeric_limits<int>::min()) {
+         value = static_cast<int>(meta->pds2.sect4.sndSurfValue);
+      } else {
+         // sndSurfValue is out of range, so just call it missing.
+         // TODO(schwehr): Consider using a tmp double if the scale will
+         // make the resulting sndSurfValue be within range.
+         preErrSprintf ("sndSurfValue out of range\n");
+         value = GRIB2MISSING_s4;
+      }
       if ((value == GRIB2MISSING_s4) || (scale == GRIB2MISSING_s1) ||
           (sndSurfType == GRIB2MISSING_u1)) {
          sndSurfValue = 0;
@@ -2152,7 +2170,7 @@ static void ParseGridPrimMiss (gridAttribType *attrib, double *grib_Data,
                         if (WxType->ugly[index].f_valid) {
                            WxType->ugly[index].f_valid = 2;
                         } else {
-                           /* Table is not valid here so set value to missPri 
+                           /* Table is not valid here so set value to missPri
                             */
                            value = attrib->missPri;
                            (*missCnt)++;
@@ -2280,7 +2298,7 @@ static void ParseGridSecMiss (gridAttribType *attrib, double *grib_Data,
                         if (WxType->ugly[index].f_valid) {
                            WxType->ugly[index].f_valid = 2;
                         } else {
-                           /* Table is not valid here so set value to missPri 
+                           /* Table is not valid here so set value to missPri
                             */
                            value = attrib->missPri;
                            (*missCnt)++;
@@ -2361,9 +2379,9 @@ static void ParseGridSecMiss (gridAttribType *attrib, double *grib_Data,
  * NOTES
  *****************************************************************************
  */
-void ParseGrid (gridAttribType *attrib, double **Grib_Data,
+void ParseGrid (DataSource &fp, gridAttribType *attrib, double **Grib_Data,
                 uInt4 *grib_DataLen, uInt4 Nx, uInt4 Ny, int scan,
-                sInt4 *iain, sInt4 ibitmap, sInt4 *ib, double unitM,
+                sInt4 nd2x3, sInt4 *iain, sInt4 ibitmap, sInt4 *ib, double unitM,
                 double unitB, uChar f_wxType, sect2_WxType *WxType,
                 CPL_UNUSED uChar f_subGrid,
                 int startX, int startY, int stopX, int stopY)
@@ -2379,7 +2397,8 @@ void ParseGrid (gridAttribType *attrib, double **Grib_Data,
    sInt4 x, y;          /* Where we are in a grid of scan value 0100 */
    sInt4 newIndex;      /* x,y in a 1 dimensional array. */
    double value;        /* The data in the new units. */
-   double *grib_Data;   /* A pointer to Grib_Data for ease of manipulation. */
+   /* A pointer to Grib_Data for ease of manipulation. */
+   double *grib_Data = NULL;
    sInt4 missCnt = 0;   /* Number of detected missing values. */
    uInt4 index;         /* Current index into Wx table. */
    float *ain = (float *) iain;
@@ -2392,10 +2411,44 @@ void ParseGrid (gridAttribType *attrib, double **Grib_Data,
    myAssert (((!f_subGrid) && (subNx == Nx)) || (f_subGrid));
    myAssert (((!f_subGrid) && (subNy == Ny)) || (f_subGrid));
 
+   if( subNy == 0 || subNx > UINT_MAX / subNy )
+   {
+       errSprintf ("Too large raster");
+       *grib_DataLen = 0;
+       *Grib_Data = NULL;
+       return;
+   }
+   
    if (subNx * subNy > *grib_DataLen) {
+
+      if( subNx * subNy > 100 * 1024 * 1024 )
+      {
+          long curPos = fp.DataSourceFtell();
+          fp.DataSourceFseek(0, SEEK_END);
+          long fileSize = fp.DataSourceFtell();
+          fp.DataSourceFseek(curPos, SEEK_SET);
+          // allow a compression ratio of 1:1000
+          if( subNx * subNy / 1000 > (uInt4)fileSize )
+          {
+            errSprintf ("ERROR: File too short\n");
+            *grib_DataLen = 0;
+            *Grib_Data = NULL;
+            return;
+          }
+      }
+
       *grib_DataLen = subNx * subNy;
-      *Grib_Data = (double *) realloc ((void *) (*Grib_Data),
+      double* newData = (double *) realloc ((void *) (*Grib_Data),
                                        (*grib_DataLen) * sizeof (double));
+      if( newData == NULL )
+      {
+          errSprintf ("Memory allocation failed");
+          free(*Grib_Data);
+          *Grib_Data = NULL;
+          *grib_DataLen = 0;
+          return;
+      }
+      *Grib_Data = newData;
    }
    grib_Data = *Grib_Data;
 
@@ -2421,13 +2474,13 @@ void ParseGrid (gridAttribType *attrib, double **Grib_Data,
        * dedicated procedure.  Here we don't since for scan != 0100, we
        * would_ need a different unpacker library, which is extremely
        * unlikely. */
-      for (scanIndex = 0; scanIndex < Nx * Ny; scanIndex++) {
+      for (scanIndex = 0; scanIndex < (uInt4)nd2x3 && scanIndex < Nx * Ny; scanIndex++) {
          if (attrib->fieldType) {
             value = iain[scanIndex];
          } else {
             value = ain[scanIndex];
          }
-         /* Make sure value is not a missing value when converting units, and 
+         /* Make sure value is not a missing value when converting units, and
           * while computing max/min. */
          if ((attrib->f_miss == 0) ||
              ((attrib->f_miss == 1) && (value != attrib->missPri)) ||
@@ -2545,7 +2598,7 @@ void ParseGrid (gridAttribType *attrib, double **Grib_Data,
             }
          }
          /* embed the missing value. */
-         for (scanIndex = 0; scanIndex < Nx * Ny; scanIndex++) {
+         for (scanIndex = 0; scanIndex < (uInt4)nd2x3 && scanIndex < Nx * Ny; scanIndex++) {
             ScanIndex2XY (scanIndex, &x, &y, scan, Nx, Ny);
             /* ScanIndex returns value as if scan was 0100 */
             newIndex = (x - 1) + (y - 1) * Nx;
@@ -2597,7 +2650,7 @@ void FreqPrint (char **ans, double *Data, sInt4 DataLen, sInt4 Nx,
                 sInt4 Ny, sChar decimal, char *comment)
 {
    int x, y, i;
-   double *ptr;
+   double *ptr = NULL;
    double value;
    freqType *freq = NULL;
    int numFreq = 0;

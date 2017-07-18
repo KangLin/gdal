@@ -37,7 +37,7 @@
 #include "ogr_sqlite.h"
 #include "cpl_conv.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                     OGRSQLiteDriverIdentify()                        */
@@ -46,9 +46,14 @@ CPL_CVSID("$Id$");
 static int OGRSQLiteDriverIdentify( GDALOpenInfo* poOpenInfo )
 
 {
-    int nLen = (int) strlen(poOpenInfo->pszFilename);
+    CPLString osExt(CPLGetExtension(poOpenInfo->pszFilename));
+    if( EQUAL(osExt, "gpkg") && GDALGetDriverByName("GPKG") != NULL )
+    {
+        return FALSE;
+    }
+
     if (STARTS_WITH_CI(poOpenInfo->pszFilename, "VirtualShape:") &&
-        nLen > 4 && EQUAL(poOpenInfo->pszFilename + nLen - 4, ".SHP"))
+        EQUAL(osExt, "shp"))
     {
         return TRUE;
     }
@@ -83,13 +88,37 @@ static int OGRSQLiteDriverIdentify( GDALOpenInfo* poOpenInfo )
 /*      Verify that the target is a real file, and has an               */
 /*      appropriate magic string at the beginning.                      */
 /* -------------------------------------------------------------------- */
-    if( poOpenInfo->nHeaderBytes < 16 )
+    if( poOpenInfo->nHeaderBytes < 100 )
         return FALSE;
+
+#ifdef ENABLE_SQL_SQLITE_FORMAT
+    if( STARTS_WITH((const char*)poOpenInfo->pabyHeader, "-- SQL SQLITE") )
+    {
+        return TRUE;
+    }
+    if( STARTS_WITH((const char*)poOpenInfo->pabyHeader, "-- SQL RASTERLITE") )
+    {
+        return -1;
+    }
+    if( STARTS_WITH((const char*)poOpenInfo->pabyHeader, "-- SQL MBTILES") )
+    {
+        return -1;
+    }
+#endif
 
     if( !STARTS_WITH((const char*)poOpenInfo->pabyHeader, "SQLite format 3") )
         return FALSE;
 
-    // Could be a Rasterlite file as well
+    // In case we are opening /vsizip/foo.zip with a .gpkg inside
+    if( (memcmp(poOpenInfo->pabyHeader + 68, "GP10", 4) == 0 ||
+         memcmp(poOpenInfo->pabyHeader + 68, "GP11", 4) == 0 ||
+         memcmp(poOpenInfo->pabyHeader + 68, "GPKG", 4) == 0) &&
+        GDALGetDriverByName("GPKG") != NULL )
+    {
+        return FALSE;
+    }
+
+    // Could be a Rasterlite or MBTiles file as well
     return -1;
 }
 
@@ -154,8 +183,7 @@ static GDALDataset *OGRSQLiteDriverOpen( GDALOpenInfo* poOpenInfo )
 /* -------------------------------------------------------------------- */
     OGRSQLiteDataSource *poDS = new OGRSQLiteDataSource();
 
-    if( !poDS->Open( poOpenInfo->pszFilename, poOpenInfo->eAccess == GA_Update,
-                     poOpenInfo->papszOpenOptions, poOpenInfo->nOpenFlags ) )
+    if( !poDS->Open( poOpenInfo ) )
     {
         delete poDS;
         return NULL;
@@ -336,6 +364,10 @@ void RegisterOGRSQLite()
     poDriver->SetMetadataItem( GDAL_DCAP_DEFAULT_FIELDS, "YES" );
     poDriver->SetMetadataItem( GDAL_DCAP_NOTNULL_GEOMFIELDS, "YES" );
     poDriver->SetMetadataItem( GDAL_DCAP_VIRTUALIO, "YES" );
+
+#ifdef ENABLE_SQL_SQLITE_FORMAT
+    poDriver->SetMetadataItem("ENABLE_SQL_SQLITE_FORMAT", "YES");
+#endif
 
     poDriver->pfnOpen = OGRSQLiteDriverOpen;
     poDriver->pfnIdentify = OGRSQLiteDriverIdentify;

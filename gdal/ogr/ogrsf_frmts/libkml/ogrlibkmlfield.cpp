@@ -36,7 +36,7 @@
 #include "ogr_p.h"
 #include "ogrsf_frmts.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 using kmldom::CameraPtr;
 using kmldom::DataPtr;
@@ -323,7 +323,7 @@ void field2kml(
             continue;
 
         /***** If the field isn't set just bail now *****/
-        if( !poOgrFeat->IsFieldSet( i ) )
+        if( !poOgrFeat->IsFieldSetAndNotNull( i ) )
             continue;
 
         OGRFieldDefn *poOgrFieldDef = poOgrFeat->GetFieldDefnRef( i );

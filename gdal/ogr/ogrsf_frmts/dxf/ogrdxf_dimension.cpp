@@ -31,7 +31,7 @@
 #include "ogr_dxf.h"
 #include "cpl_conv.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                         TranslateDIMENSION()                         */
@@ -126,7 +126,12 @@ OGRFeature *OGRDXFLayer::TranslateDIMENSION()
             break;
         }
     }
-
+    if( nCode < 0 )
+    {
+        DXF_LAYER_READER_ERROR();
+        delete poFeature;
+        return NULL;
+    }
     if( nCode == 0 )
         poDS->UnreadValue();
 
@@ -238,12 +243,14 @@ the approach is as above in all these cases.
     dfVec2Y = (dfArrowY2 - dfArrowY1);
 
     // vector 1
-    double dfScaleFactor = dfTargetLength / VECTOR_LEN(dfVec1X, dfVec1Y);
+    const double dfVec1Len = VECTOR_LEN(dfVec1X, dfVec1Y);
+    double dfScaleFactor = (dfVec1Len == 0.0) ? 0.0 : dfTargetLength / dfVec1Len;
     dfVec1X *= dfScaleFactor;
     dfVec1Y *= dfScaleFactor;
 
     // vector 2
-    dfScaleFactor = dfTargetLength / VECTOR_LEN(dfVec2X,dfVec2Y);
+    const double dfVec2Len = VECTOR_LEN(dfVec2X,dfVec2Y);
+    dfScaleFactor = (dfVec2Len == 0.0) ? 0.0 : dfTargetLength / dfVec2Len;
     dfVec2X *= dfScaleFactor;
     dfVec2Y *= dfScaleFactor;
 
@@ -360,7 +367,11 @@ the approach is as above in all these cases.
 void OGRDXFLayer::FormatDimension( CPLString &osText, double dfValue )
 
 {
-    const int nPrecision = atoi(poDS->GetVariable("$LUPREC","4"));
+    int nPrecision = atoi(poDS->GetVariable("$LUPREC","4"));
+    if( nPrecision < 0 )
+        nPrecision = 0;
+    else if( nPrecision > 20 )
+        nPrecision = 20;
 
     // We could do a significantly more precise formatting if we want
     // to spend the effort.  See QCAD's rs_dimlinear.cpp and related files

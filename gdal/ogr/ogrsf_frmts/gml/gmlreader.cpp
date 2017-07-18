@@ -27,19 +27,24 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
+#include "cpl_port.h"
 #include "gmlreaderp.h"
 #include "gmlreader.h"
+
+#include <climits>
+#include <cstdlib>
+#include <cstring>
+#include <algorithm>
+#include <string>
+
+#include "cpl_conv.h"
 #include "cpl_error.h"
+#include "cpl_multiproc.h"
 #include "cpl_string.h"
 #include "gmlutils.h"
-#include "cpl_conv.h"
-#include <map>
-#include "cpl_multiproc.h"
 #include "ogr_geometry.h"
 
-#include <algorithm>
-
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                            ~IGMLReader()                             */
@@ -344,7 +349,7 @@ bool GMLReader::SetupParserXerces()
     }
 
     if (m_GMLInputSource == NULL && fpGML != NULL)
-        m_GMLInputSource = new GMLInputSource(fpGML);
+        m_GMLInputSource = OGRCreateXercesInputSource(fpGML);
 
     return true;
 }
@@ -401,7 +406,7 @@ void GMLReader::CleanupParser()
 #ifdef HAVE_XERCES
     delete m_poSAXReader;
     m_poSAXReader = NULL;
-    delete m_GMLInputSource;
+    OGRDestroyXercesInputSource(m_GMLInputSource);
     m_GMLInputSource = NULL;
     delete m_poCompleteFeature;
     m_poCompleteFeature = NULL;
@@ -428,38 +433,6 @@ void GMLReader::CleanupParser()
 
     m_bReadStarted = false;
 }
-
-#ifdef HAVE_XERCES
-
-GMLBinInputStream::GMLBinInputStream(VSILFILE *fpIn) :
-    fp(fpIn),
-    emptyString(0)
-{}
-
-GMLBinInputStream::~GMLBinInputStream() {}
-
-XMLFilePos GMLBinInputStream::curPos() const
-{
-    return (XMLFilePos)VSIFTellL(fp);
-}
-
-XMLSize_t GMLBinInputStream::readBytes(XMLByte* const toFill, const XMLSize_t maxToRead)
-{
-    return (XMLSize_t)VSIFReadL(toFill, 1, maxToRead, fp);
-}
-
-const XMLCh *GMLBinInputStream::getContentType() const { return &emptyString; }
-
-GMLInputSource::GMLInputSource(VSILFILE *fp, MemoryManager *const manager) :
-    InputSource(manager),
-    binInputStream(new GMLBinInputStream(fp))
-{}
-
-GMLInputSource::~GMLInputSource() {}
-
-BinInputStream *GMLInputSource::makeStream() const { return binInputStream; }
-
-#endif  // HAVE_XERCES
 
 /************************************************************************/
 /*                        NextFeatureXerces()                           */
@@ -729,19 +702,19 @@ int GMLReader::GetFeatureElementIndex( const char *pszElement,
 
         // Begin of CSW SearchResults.
         else if (nElementLength == (int)strlen("BriefRecord") &&
-                 nLenLast == (int)strlen("SearchResults") &&
+                 nLenLast == strlen("SearchResults") &&
                  strcmp(pszElement, "BriefRecord") == 0 &&
                  strcmp(pszLast, "SearchResults") == 0)
         {
         }
         else if (nElementLength == (int)strlen("SummaryRecord") &&
-                 nLenLast == (int)strlen("SearchResults") &&
+                 nLenLast == strlen("SearchResults") &&
                  strcmp(pszElement, "SummaryRecord") == 0 &&
                  strcmp(pszLast, "SearchResults") == 0)
         {
         }
         else if (nElementLength == (int)strlen("Record") &&
-                 nLenLast == (int)strlen("SearchResults") &&
+                 nLenLast == strlen("SearchResults") &&
                  strcmp(pszElement, "Record") == 0 &&
                  strcmp(pszLast, "SearchResults") == 0)
         {
@@ -762,8 +735,14 @@ int GMLReader::GetFeatureElementIndex( const char *pszElement,
                         return i;
                     }
                 }
+                // Give a chance to find a feature class by element name
+                // This is for example needed for
+                // autotest/ogr/data/gml_jpfgd/BldA.xml that has a
+                // feature at a low nesting level.
             }
-            return -1;
+            else {
+                return -1;
+            }
         }
     }
 
@@ -886,6 +865,11 @@ void GMLReader::PopState()
             m_poCompleteFeature == NULL )
         {
             m_poCompleteFeature = m_poState->m_poFeature;
+            m_poState->m_poFeature = NULL;
+        }
+        else if( !bUseExpatReader && m_poState->m_poFeature != NULL )
+        {
+            delete m_poState->m_poFeature;
             m_poState->m_poFeature = NULL;
         }
 #endif

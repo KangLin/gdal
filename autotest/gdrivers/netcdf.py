@@ -2866,6 +2866,132 @@ def netcdf_70():
     return 'success'
 
 ###############################################################################
+# Test that we take into account x and y offset and scaling
+# (https://github.com/OSGeo/gdal/pull/200)
+
+def netcdf_71():
+
+    if gdaltest.netcdf_drv is None:
+        return 'skip'
+
+    ds = gdal.Open('data/test_coord_scale_offset.nc')
+    gt = ds.GetGeoTransform()
+    expected_gt = (-690769.999174516, 1015.8812500000931, 0.0, 2040932.1838741193, 0.0, 1015.8812499996275)
+    if max(abs(gt[i] - expected_gt[i]) for i in range(6)) > 1e-3:
+        print(gt)
+        return 'fail'
+
+    return 'success'
+
+###############################################################################
+# test int64 attributes / dim
+
+def netcdf_72():
+
+    if gdaltest.netcdf_drv is None:
+        return 'skip'
+
+    if not gdaltest.netcdf_drv_has_nc4:
+        return 'skip'
+
+    ds = gdal.Open('data/int64dim.nc')
+    mdi = ds.GetRasterBand(1).GetMetadataItem('NETCDF_DIM_TIME')
+    if mdi != '123456789012':
+        print(mdi)
+        return 'fail'
+
+    return 'success'
+
+###############################################################################
+# test geostationary with radian units (https://github.com/OSGeo/gdal/pull/220)
+
+def netcdf_73():
+
+    if gdaltest.netcdf_drv is None:
+        return 'skip'
+
+    ds = gdal.Open('data/geos_rad.nc')
+    gt = ds.GetGeoTransform()
+    expected_gt = (-5979486.362104082, 1087179.4077774752, 0.0, -5979487.123448145, 0.0, 1087179.4077774752)
+    if max([abs(gt[i]-expected_gt[i]) for i in range(6)]) > 1:
+        print(gt)
+        return 'fail'
+
+    return 'success'
+
+###############################################################################
+# test geostationary with microradian units (https://github.com/OSGeo/gdal/pull/220)
+
+def netcdf_74():
+
+    if gdaltest.netcdf_drv is None:
+        return 'skip'
+
+    ds = gdal.Open('data/geos_microradian.nc')
+    gt = ds.GetGeoTransform()
+    expected_gt = (-5739675.119757546, 615630.8078590936, 0.0, -1032263.7666924844, 0.0, 615630.8078590936)
+    if max([abs(gt[i]-expected_gt[i]) for i in range(6)]) > 1:
+        print(gt)
+        return 'fail'
+
+    return 'success'
+
+###############################################################################
+# test opening a ncdump file
+
+def netcdf_75():
+
+    if gdaltest.netcdf_drv is None:
+        return 'skip'
+
+    if gdaltest.netcdf_drv.GetMetadataItem("ENABLE_NCDUMP") != 'YES':
+        return 'skip'
+
+    tst = gdaltest.GDALTest( 'NetCDF', 'byte.nc.txt',
+                             1, 4672 )
+
+    wkt = """PROJCS["NAD27 / UTM zone 11N",
+    GEOGCS["NAD27",
+        DATUM["North_American_Datum_1927",
+            SPHEROID["Clarke 1866",6378206.4,294.9786982139006,
+                AUTHORITY["EPSG","7008"]],
+            AUTHORITY["EPSG","6267"]],
+        PRIMEM["Greenwich",0],
+        UNIT["degree",0.0174532925199433],
+        AUTHORITY["EPSG","4267"]],
+    PROJECTION["Transverse_Mercator"],
+    PARAMETER["latitude_of_origin",0],
+    PARAMETER["central_meridian",-117],
+    PARAMETER["scale_factor",0.9996],
+    PARAMETER["false_easting",500000],
+    PARAMETER["false_northing",0],
+    UNIT["metre",1,
+        AUTHORITY["EPSG","9001"]],
+    AUTHORITY["EPSG","26711"]]"""
+
+    return tst.testOpen( check_prj = wkt )
+
+###############################################################################
+# test opening a vector ncdump file
+
+def netcdf_76():
+
+    if gdaltest.netcdf_drv is None:
+        return 'skip'
+
+    if gdaltest.netcdf_drv.GetMetadataItem("ENABLE_NCDUMP") != 'YES':
+        return 'skip'
+
+    ds = ogr.Open('data/poly.nc.txt')
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    if f is None or f.GetGeometryRef() is None:
+        f.DumpReadable()
+        return 'fail'
+
+    return 'success'
+
+###############################################################################
 
 ###############################################################################
 # main tests list
@@ -2945,7 +3071,13 @@ gdaltest_list = [
     netcdf_67,
     netcdf_68,
     netcdf_69,
-    netcdf_70
+    netcdf_70,
+    netcdf_71,
+    netcdf_72,
+    netcdf_73,
+    netcdf_74,
+    netcdf_75,
+    netcdf_76
 ]
 
 ###############################################################################

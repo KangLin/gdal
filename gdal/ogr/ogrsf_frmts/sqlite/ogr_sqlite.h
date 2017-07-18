@@ -63,14 +63,16 @@
 
 #include "rasterlite2_header.h"
 
-#if SQLITE_VERSION_NUMBER >= 3006000
-#define HAVE_SQLITE_VFS
-#define HAVE_SQLITE3_PREPARE_V2
-#endif
-
 #ifndef DO_NOT_INCLUDE_SQLITE_CLASSES
 
 #define UNINITIALIZED_SRID  -2
+
+#if defined(DEBUG) || defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION) || defined(ALLOW_FORMAT_DUMPS)
+// Enable accepting a SQL dump (starting with a "-- SQL SQLITE" or
+// "-- SQL RASTERLITE" or "--SQL MBTILES" line) as a valid
+// file. This makes fuzzer life easier
+#define ENABLE_SQL_SQLITE_FORMAT
+#endif
 
 /************************************************************************/
 /*      Format used to store geometry data in the database.             */
@@ -317,6 +319,15 @@ class OGRSQLiteLayer : public OGRLayer, public IOGRSQLiteGetSpatialWhere
     virtual CPLString     GetSpatialWhere(CPL_UNUSED int iGeomCol,
                                           CPL_UNUSED OGRGeometry* poFilterGeom) override { return ""; }
 
+    static OGRErr       GetSpatialiteGeometryHeader( const GByte *pabyData,
+                                                    int nBytes,
+                                                    int* pnSRID,
+                                                    OGRwkbGeometryType* peType,
+                                                    bool* pbIsEmpty,
+                                                    double* pdfMinX,
+                                                    double* pdfMinY,
+                                                    double* pdfMaxX,
+                                                    double* pdfMaxY );
     static OGRErr       ImportSpatiaLiteGeometry( const GByte *, int,
                                                   OGRGeometry ** );
     static OGRErr       ImportSpatiaLiteGeometry( const GByte *, int,
@@ -348,6 +359,7 @@ class OGRSQLiteTableLayer : public OGRSQLiteLayer
     CPLString           osLastInsertStmt;
 
     int                 bHasCheckedTriggers;
+    bool                m_bHasTriedDetectingFID64;
 
     void                ClearInsertStmt();
 
@@ -357,7 +369,6 @@ class OGRSQLiteTableLayer : public OGRSQLiteLayer
 
     OGRErr              RecomputeOrdinals();
 
-    OGRErr              AddColumnAncientMethod( OGRFieldDefn& oField);
     void                AddColumnDef(char* pszNewFieldList, size_t nBufLen,
                                      OGRFieldDefn* poFldDefn);
 
@@ -369,8 +380,8 @@ class OGRSQLiteTableLayer : public OGRSQLiteLayer
                                       const char* pszNewFieldList,
                                       const char* pszGenericErrorMessage);
     OGRErr              BindValues( OGRFeature *poFeature,
-                                        sqlite3_stmt* hStmt,
-                                        int bBindNullValues );
+                                    sqlite3_stmt* hStmt,
+                                    bool bBindUnsetAsNull );
 
     int                 CheckSpatialIndexTable(int iGeomCol);
 
@@ -684,16 +695,14 @@ class OGRSQLiteBaseDataSource : public GDALPamDataset
     sqlite3             *hDB;
     int                 bUpdate;
 
-#ifdef HAVE_SQLITE_VFS
     sqlite3_vfs*        pMyVFS;
-#endif
 
     VSILFILE*           fpMainFile; /* Set by the VFS layer when it opens the DB */
                                     /* Must *NOT* be closed by the datasource explicitly. */
 
     int                 OpenOrCreateDB(int flags, int bRegisterOGR2SQLiteExtensions);
-    int                 SetSynchronous();
-    int                 SetCacheSize();
+    bool                SetSynchronous();
+    bool                SetCacheSize();
 
     void                CloseDB();
 
@@ -811,8 +820,7 @@ class OGRSQLiteDataSource CPL_FINAL : public OGRSQLiteBaseDataSource
                         OGRSQLiteDataSource();
                         virtual ~OGRSQLiteDataSource();
 
-    int                 Open( const char *, int bUpdateIn,
-                              char** papszOpenOptions, int nOpenFlags );
+    int                 Open( GDALOpenInfo* poOpenInfo );
     int                 Create( const char *, char **papszOptions );
 
     int                 OpenTable( const char *pszTableName,
@@ -932,24 +940,14 @@ class RL2RasterBand CPL_FINAL: public GDALPamRasterBand
 
 #endif /* DO_NOT_INCLUDE_SQLITE_CLASSES */
 
-/* To escape literals. The returned string doesn't contain the surrounding single quotes */
-CPLString OGRSQLiteEscape( const char *pszLiteral );
-
-/* To escape table or field names. The returned string doesn't contain the surrounding double quotes */
-CPLString OGRSQLiteEscapeName( const char* pszName );
-
-CPLString OGRSQLiteParamsUnquote(const char* pszVal);
-
 CPLString OGRSQLiteFieldDefnToSQliteFieldDefn( OGRFieldDefn* poFieldDefn,
                                                int bSQLiteDialectInternalUse );
 
 int OGRSQLITEStringToDateTimeField( OGRFeature* poFeature, int iField,
                                     const char* pszValue );
 
-#ifdef HAVE_SQLITE_VFS
 typedef void (*pfnNotifyFileOpenedType)(void* pfnUserData, const char* pszFilename, VSILFILE* fp);
 sqlite3_vfs* OGRSQLiteCreateVFS(pfnNotifyFileOpenedType pfn, void* pfnUserData);
-#endif
 
 void OGRSQLiteRegisterInflateDeflate(sqlite3* hDB);
 

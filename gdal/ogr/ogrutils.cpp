@@ -48,14 +48,18 @@
 #include "ogr_geometry.h"
 #include "ogrsf_frmts.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 // Returns whether a double fits within an int.
 // Unable to put this in cpl_port.h as include limit breaks grib.
 inline bool CPLIsDoubleAnInt(double d)
 {
-    if (d > std::numeric_limits<int>::max()) return false;
-    if (d < std::numeric_limits<int>::min()) return false;
+    // Write it this way to detect NaN
+    if ( !(d >= std::numeric_limits<int>::min() &&
+           d <= std::numeric_limits<int>::max()) )
+    {
+        return false;
+    }
     return d == static_cast<double>(static_cast<int>(d));
 }
 
@@ -1050,12 +1054,16 @@ int OGRParseDate( const char *pszInput,
 
         while( *pszInput >= '0' && *pszInput <= '9' )
             ++pszInput;
+        if( *pszInput == '\0' )
+            return TRUE;
 
         bGotSomething = true;
 
         // If ISO 8601 format.
         if( *pszInput == 'T' )
             ++pszInput;
+        else if( *pszInput != ' ' )
+            return FALSE;
     }
 
 /* -------------------------------------------------------------------- */
@@ -1495,8 +1503,8 @@ char* OGRGetXML_UTF8_EscapedString(const char* pszString)
 /*                        OGRCompareDate()                              */
 /************************************************************************/
 
-int OGRCompareDate( OGRField *psFirstTuple,
-                    OGRField *psSecondTuple )
+int OGRCompareDate( const OGRField *psFirstTuple,
+                    const OGRField *psSecondTuple )
 {
     // TODO: We ignore TZFlag.
 
@@ -1667,7 +1675,7 @@ OGRErr OGRCheckPermutation( int* panPermutation, int nSize )
     return eErr;
 }
 
-OGRErr OGRReadWKBGeometryType( unsigned char * pabyData,
+OGRErr OGRReadWKBGeometryType( const unsigned char * pabyData,
                                OGRwkbVariant eWkbVariant,
                                OGRwkbGeometryType *peGeometryType )
 {

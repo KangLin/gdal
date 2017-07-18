@@ -41,7 +41,7 @@ CADTables::CADTables()
 {
 }
 
-void CADTables::AddTable( TableType eType, CADHandle hHandle )
+void CADTables::AddTable( TableType eType, const CADHandle& hHandle )
 {
     mapTables[eType] = hHandle;
 }
@@ -131,7 +131,7 @@ int CADTables::ReadLayersTable( CADFile * const pCADFile, long dLayerControlHand
         {
             DebugMsg( "Entity object is null\n" );
             break;
-        } 
+        }
         else if ( dCurrentEntHandle == dLastEntHandle )
         {
             FillLayer( spEntityObj.get() );

@@ -34,7 +34,7 @@
 
 #include <cmath>
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                            OGRDXFLayer()                             */
@@ -478,6 +478,7 @@ OGRFeature *OGRDXFLayer::TranslateMTEXT()
     bool bHaveZ = false;
     int nAttachmentPoint = -1;
     CPLString osText;
+    CPLString osStyleName = "Arial";
 
     while( (nCode = poDS->ReadValue(szLineBuf,sizeof(szLineBuf))) > 0 )
     {
@@ -522,6 +523,10 @@ OGRFeature *OGRDXFLayer::TranslateMTEXT()
 
           case 50:
             dfAngle = CPLAtof(szLineBuf);
+            break;
+
+          case 7:
+            osStyleName = TextUnescape(szLineBuf);
             break;
 
           default:
@@ -596,7 +601,7 @@ OGRFeature *OGRDXFLayer::TranslateMTEXT()
     CPLString osStyle;
     char szBuffer[64];
 
-    osStyle.Printf("LABEL(f:\"Arial\",t:\"%s\"",osText.c_str());
+    osStyle.Printf("LABEL(f:\"%s\",t:\"%s\"", osStyleName.c_str(), osText.c_str());
 
     if( dfAngle != 0.0 )
     {
@@ -608,6 +613,18 @@ OGRFeature *OGRDXFLayer::TranslateMTEXT()
     {
         CPLsnprintf(szBuffer, sizeof(szBuffer), "%.3g", dfHeight);
         osStyle += CPLString().Printf(",s:%sg", szBuffer);
+    }
+
+    if( dfXDirection != 0.0 )
+    {
+        CPLsnprintf(szBuffer, sizeof(szBuffer), "%.6g", dfXDirection);
+        osStyle += CPLString().Printf(",dx:%s", szBuffer);
+    }
+
+    if( dfYDirection != 0.0 )
+    {
+        CPLsnprintf(szBuffer, sizeof(szBuffer), "%.6g", dfYDirection);
+        osStyle += CPLString().Printf(",dy:%s", szBuffer);
     }
 
     if( nAttachmentPoint >= 0 && nAttachmentPoint <= 9 )
@@ -651,7 +668,10 @@ OGRFeature *OGRDXFLayer::TranslateTEXT()
     double dfZ = 0.0;
     double dfAngle = 0.0;
     double dfHeight = 0.0;
+    double dfXDirection = 0.0;
+    double dfYDirection = 0.0;
     CPLString osText;
+    CPLString osStyleName = "Arial";
     bool bHaveZ = false;
     int nAnchorPosition = 1;
     int nHorizontalAlignment = 0;
@@ -667,6 +687,14 @@ OGRFeature *OGRDXFLayer::TranslateTEXT()
 
           case 20:
             dfY = CPLAtof(szLineBuf);
+            break;
+
+          case 11:
+            dfXDirection = CPLAtof(szLineBuf);
+            break;
+
+          case 21:
+            dfYDirection = CPLAtof(szLineBuf);
             break;
 
           case 30:
@@ -695,6 +723,10 @@ OGRFeature *OGRDXFLayer::TranslateTEXT()
             nVerticalAlignment = atoi(szLineBuf);
             break;
 
+          case 7:
+            osStyleName = TextUnescape(szLineBuf);
+            break;
+          
           default:
             TranslateGenericProperty( poFeature, nCode, szLineBuf );
             break;
@@ -804,8 +836,8 @@ OGRFeature *OGRDXFLayer::TranslateTEXT()
     CPLString osStyle;
     char szBuffer[64];
 
-    osStyle.Printf("LABEL(f:\"Arial\",t:\"%s\"",osText.c_str());
-
+    osStyle.Printf("LABEL(f:\"%s\",t:\"%s\"", osStyleName.c_str(), osText.c_str());
+    
     osStyle += CPLString().Printf(",p:%d", nAnchorPosition);
 
     if( dfAngle != 0.0 )
@@ -818,6 +850,18 @@ OGRFeature *OGRDXFLayer::TranslateTEXT()
     {
         CPLsnprintf(szBuffer, sizeof(szBuffer), "%.3g", dfHeight);
         osStyle += CPLString().Printf(",s:%sg", szBuffer);
+    }
+
+    if( dfXDirection != 0.0 )
+    {
+        CPLsnprintf(szBuffer, sizeof(szBuffer), "%.6g", dfXDirection - dfX);
+        osStyle += CPLString().Printf(",dx:%s", szBuffer);
+    }
+
+    if( dfYDirection != 0.0 )
+    {
+        CPLsnprintf(szBuffer, sizeof(szBuffer), "%.6g", dfYDirection - dfY);
+        osStyle += CPLString().Printf(",dy:%s", szBuffer);
     }
 
     const unsigned char *pabyDWGColors = ACGetColorTable();
@@ -1297,14 +1341,16 @@ OGRFeature *OGRDXFLayer::TranslatePOLYLINE()
                 iPoint++;
                 vertexIndex74 = 0;
             }
+            if( startPoint >= 0 )
+            {
+                // complete the ring
+                poLR->setPoint(iPoint,papoPoints[startPoint]);
 
-            // complete the ring
-            poLR->setPoint(iPoint,papoPoints[startPoint]);
+                OGRPolygon *poPolygon = new OGRPolygon();
+                poPolygon->addRing((OGRCurve *)poLR);
 
-            OGRPolygon *poPolygon = new OGRPolygon();
-            poPolygon->addRing((OGRCurve *)poLR);
-
-            poPS->addGeometryDirectly(poPolygon);
+                poPS->addGeometryDirectly(poPolygon);
+            }
 
             // delete the ring to prevent leakage
             delete poLR;
@@ -1572,20 +1618,27 @@ OGRFeature *OGRDXFLayer::TranslateELLIPSE()
     if( dfStartAngle > dfEndAngle )
         dfEndAngle += 360.0;
 
-    OGRGeometry *poEllipse =
-        OGRGeometryFactory::approximateArcAngles( dfX1, dfY1, dfZ1,
-                                                  dfPrimaryRadius,
-                                                  dfSecondaryRadius,
-                                                  dfRotation,
-                                                  dfStartAngle, dfEndAngle,
-                                                  0.0 );
+    if( fabs(dfEndAngle - dfStartAngle) <= 361.0 )
+    {
+        OGRGeometry *poEllipse =
+            OGRGeometryFactory::approximateArcAngles( dfX1, dfY1, dfZ1,
+                                                    dfPrimaryRadius,
+                                                    dfSecondaryRadius,
+                                                    dfRotation,
+                                                    dfStartAngle, dfEndAngle,
+                                                    0.0 );
 
-    if( !bHaveZ )
-        poEllipse->flattenTo2D();
+        if( !bHaveZ )
+            poEllipse->flattenTo2D();
 
-    if( bApplyOCSTransform == true )
-        ApplyOCSTransformer( poEllipse );
-    poFeature->SetGeometryDirectly( poEllipse );
+        if( bApplyOCSTransform == true )
+            ApplyOCSTransformer( poEllipse );
+        poFeature->SetGeometryDirectly( poEllipse );
+    }
+    else
+    {
+        // TODO: emit error ?
+    }
 
     PrepareLineStyle( poFeature );
 
@@ -1665,16 +1718,23 @@ OGRFeature *OGRDXFLayer::TranslateARC()
     if( dfStartAngle > dfEndAngle )
         dfEndAngle += 360.0;
 
-    OGRGeometry *poArc =
-        OGRGeometryFactory::approximateArcAngles( dfX1, dfY1, dfZ1,
-                                                  dfRadius, dfRadius, 0.0,
-                                                  dfStartAngle, dfEndAngle,
-                                                  0.0 );
-    if( !bHaveZ )
-        poArc->flattenTo2D();
+    if( fabs(dfEndAngle - dfStartAngle) <= 361.0 )
+    {
+        OGRGeometry *poArc =
+            OGRGeometryFactory::approximateArcAngles( dfX1, dfY1, dfZ1,
+                                                    dfRadius, dfRadius, 0.0,
+                                                    dfStartAngle, dfEndAngle,
+                                                    0.0 );
+        if( !bHaveZ )
+            poArc->flattenTo2D();
 
-    ApplyOCSTransformer( poArc );
-    poFeature->SetGeometryDirectly( poArc );
+        ApplyOCSTransformer( poArc );
+        poFeature->SetGeometryDirectly( poArc );
+    }
+    else
+    {
+        // TODO: emit error ?
+    }
 
     PrepareLineStyle( poFeature );
 
@@ -1686,7 +1746,7 @@ OGRFeature *OGRDXFLayer::TranslateARC()
 /************************************************************************/
 
 void rbspline2(int npts,int k,int p1,double b[],double h[],
-        bool xflag, double x[], double p[]);
+        bool bCalculateKnots, double knots[], double p[]);
 
 OGRFeature *OGRDXFLayer::TranslateSPLINE()
 
@@ -1738,14 +1798,35 @@ OGRFeature *OGRDXFLayer::TranslateSPLINE()
 
           case 71:
             nDegree = atoi(szLineBuf);
+            // Arbitrary threshold
+            if( nDegree < 0 || nDegree > 100)
+            {
+                DXF_LAYER_READER_ERROR();
+                delete poFeature;
+                return NULL;
+            }
             break;
 
           case 72:
             nKnots = atoi(szLineBuf);
+            // Arbitrary threshold
+            if( nKnots < 0 || nKnots > 10000000)
+            {
+                DXF_LAYER_READER_ERROR();
+                delete poFeature;
+                return NULL;
+            }
             break;
 
           case 73:
             nControlPoints = atoi(szLineBuf);
+            // Arbitrary threshold
+            if( nControlPoints < 0 || nControlPoints > 10000000)
+            {
+                DXF_LAYER_READER_ERROR();
+                delete poFeature;
+                return NULL;
+            }
             break;
 
           default:

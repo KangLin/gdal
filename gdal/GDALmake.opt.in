@@ -67,7 +67,7 @@ INST_DOCS	=	@exec_prefix@/doc
 INST_MAN	=	@mandir@
 INST_HTML	=	$(HOME)/www/gdal
 
-CPPFLAGS	= @CPPFLAGS@ -I$(GDAL_ROOT)/port @EXTRA_INCLUDES@ -DGDAL_COMPILATION
+CPPFLAGS	:= @CPPFLAGS@ -I$(GDAL_ROOT)/port @EXTRA_INCLUDES@ -DGDAL_COMPILATION
 CFLAGS		= @CFLAGS@ @C_WFLAGS@ $(USER_DEFS)
 CXXFLAGS	= @CXXFLAGS@ @CXX_WFLAGS@ $(USER_DEFS)
 CFLAGS_NOFTRAPV          = @CFLAGS_NOFTRAPV@ @C_WFLAGS@ $(USER_DEFS)
@@ -119,9 +119,9 @@ GDAL_INCLUDE	=	-I$(GDAL_ROOT)/port -I$(GDAL_ROOT)/gcore \
 
 # libtool targets and help variables
 LIBGDAL	:=		libgdal.la
-LIBGDAL_CURRENT	:=	21
+LIBGDAL_CURRENT	:=	22
 LIBGDAL_REVISION	:=	0
-LIBGDAL_AGE	:=	1
+LIBGDAL_AGE	:=	2
 
 # native build targets and variables
 GDAL_VER	=	@GDAL_VER@
@@ -272,6 +272,9 @@ JP2LURA_INCLUDE 	= @JP2LURA_INCLUDE@
 #
 HAVE_XERCES	= @HAVE_XERCES@
 XERCES_INCLUDE	= @XERCES_INCLUDE@
+ifeq ($(HAVE_XERCES),yes)
+CPPFLAGS	+= -DHAVE_XERCES $(XERCES_INCLUDE) $(CPPFLAGS)
+endif
 
 #
 # Enable NAS format
@@ -394,32 +397,6 @@ LIBXML2_INC = @LIBXML2_INC@
 LIBXML2_LIB = @LIBXML2_LIB@
 
 #
-# DWGdirect Library
-#
-DWGDIRECT =	@DWGDIRECT@
-DWG_PLT = @DWG_PLT@
-
-ifneq ($(DWGDIRECT),)
-DWG_LIBDIR =	$(DWGDIRECT)/lib/$(DWG_PLT)
-DWG_LIBS = $(DWG_LIBDIR)/DD_$(DWG_PLT)_ModelerGeometry.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_AcisRenderer.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_Br.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_AcisBuilder.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_Db.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_Gs.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_SpatialIndex.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_Gi.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_Ge.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_Root.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_FT.a \
-	$(DWG_LIBDIR)/DD_$(DWG_PLT)_Alloc.a
-HAVE_DWGDIRECT = yes
-else
-DWG_LIBS =
-HAVE_DWGDIRECT = no
-endif
-
-#
 # CAD Support
 #
 HAVE_CAD	=	@CXX11_SUPPORT@
@@ -524,6 +501,12 @@ PDFIUM_PLUGIN_LIB = @PDFIUM_PLUGIN_LIB@
 #HAVE_CHARLS = yes
 #CHARLS_INC = -I/path/to/charls_include
 #CHARLS_LIB = -L/path/to/charls_lib -lCharLS
+
+#
+# Teigha stuff
+#
+HAVE_TEIGHA = @HAVE_TEIGHA@
+TEIGHA_DIR = @TEIGHA_DIR@
 
 #
 # PROJ.4 stuff

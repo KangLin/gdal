@@ -41,7 +41,7 @@
 
 #include "ogr_geometry.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /*!
   \brief VFKReaderSQLite constructor
@@ -213,7 +213,7 @@ VFKReaderSQLite::VFKReaderSQLite( const char *pszFileName ) :
     if( m_bNewDb )
     {
         OGRSpatialReference *poSRS;
-            
+
         /* new DB, create support metadata tables */
         osCommand.Printf(
             "CREATE TABLE %s (file_name text, file_size integer, "
@@ -294,11 +294,14 @@ int VFKReaderSQLite::ReadDataBlocks()
     while(ExecuteSQL(hStmt) == OGRERR_NONE) {
         const char *pszName = (const char*) sqlite3_column_text(hStmt, 0);
         const char *pszDefn = (const char*) sqlite3_column_text(hStmt, 1);
-        IVFKDataBlock *poNewDataBlock =
-            (IVFKDataBlock *) CreateDataBlock(pszName);
-        poNewDataBlock->SetGeometryType();
-        poNewDataBlock->SetProperties(pszDefn);
-        VFKReader::AddDataBlock(poNewDataBlock, NULL);
+        if( pszName && pszDefn )
+        {
+            IVFKDataBlock *poNewDataBlock =
+                (IVFKDataBlock *) CreateDataBlock(pszName);
+            poNewDataBlock->SetGeometryType();
+            poNewDataBlock->SetProperties(pszDefn);
+            VFKReader::AddDataBlock(poNewDataBlock, NULL);
+        }
     }
 
     CPL_IGNORE_RET_VAL(sqlite3_exec(m_poDB, "BEGIN", NULL, NULL, NULL));
@@ -538,8 +541,9 @@ void VFKReaderSQLite::AddDataBlock(IVFKDataBlock *poDataBlock, const char *pszDe
                      VFK_DB_TABLE, pszBlockName);
     sqlite3_stmt *hStmt = PrepareStatement(osCommand.c_str());
 
-    if (ExecuteSQL(hStmt) == OGRERR_NONE &&
-        sqlite3_column_int(hStmt, 0) == 0) {
+    if (ExecuteSQL(hStmt) == OGRERR_NONE )
+    {
+      if( sqlite3_column_int(hStmt, 0) == 0) {
 
         osCommand.Printf("CREATE TABLE IF NOT EXISTS '%s' (", pszBlockName);
         for (int i = 0; i < poDataBlock->GetPropertyCount(); i++) {
@@ -606,8 +610,9 @@ void VFKReaderSQLite::AddDataBlock(IVFKDataBlock *poDataBlock, const char *pszDe
                          "('%s', '%s', %d, 2, 5514, 'WKB')",
                          VFK_DB_GEOMETRY_TABLE, pszBlockName, GEOM_COLUMN, geom_type);
         ExecuteSQL(osCommand.c_str());
-        
-        sqlite3_finalize(hStmt);
+      }
+
+      sqlite3_finalize(hStmt);
     }
 
     return VFKReader::AddDataBlock(poDataBlock, NULL);
@@ -625,14 +630,14 @@ sqlite3_stmt *VFKReaderSQLite::PrepareStatement(const char *pszSQLCommand)
     CPLDebug("OGR-VFK", "VFKReaderSQLite::PrepareStatement(): %s", pszSQLCommand);
 
     sqlite3_stmt *hStmt = NULL;
-    const int rc = sqlite3_prepare(m_poDB, pszSQLCommand, -1,
+    const int rc = sqlite3_prepare_v2(m_poDB, pszSQLCommand, -1,
                                    &hStmt, NULL);
 
     // TODO(schwehr): if( rc == SQLITE_OK ) return NULL;
     if (rc != SQLITE_OK)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "In PrepareStatement(): sqlite3_prepare(%s):\n  %s",
+                 "In PrepareStatement(): sqlite3_prepare_v2(%s):\n  %s",
                  pszSQLCommand, sqlite3_errmsg(m_poDB));
 
         if(hStmt != NULL) {
@@ -690,12 +695,13 @@ OGRErr VFKReaderSQLite::ExecuteSQL( const char *pszSQLCommand, bool bQuiet )
         if (!bQuiet)
             CPLError(CE_Failure, CPLE_AppDefined,
                      "In ExecuteSQL(%s): %s",
-                     pszSQLCommand, pszErrMsg);
+                     pszSQLCommand, pszErrMsg ? pszErrMsg : "(null)");
         else
             CPLError(CE_Warning, CPLE_AppDefined,
                      "In ExecuteSQL(%s): %s",
-                     pszSQLCommand, pszErrMsg);
+                     pszSQLCommand, pszErrMsg ? pszErrMsg : "(null)");
 
+        sqlite3_free(pszErrMsg);
         return  OGRERR_FAILURE;
     }
 
@@ -736,17 +742,17 @@ OGRErr VFKReaderSQLite::AddFeature( IVFKDataBlock *poDataBlock,
             case OFTInteger:
                 osValue.Printf("%d", poProperty->GetValueI());
                 break;
+            case OFTInteger64:
+                osValue.Printf(CPL_FRMT_GIB, poProperty->GetValueI64());
+                break;
             case OFTReal:
                 osValue.Printf("%f", poProperty->GetValueD());
                 break;
             case OFTString:
-                if (poDataBlock->GetProperty(i)->IsIntBig())
-                    osValue.Printf("%s", poProperty->GetValueS());
-                else
-                    osValue.Printf("'%s'", poProperty->GetValueS(true));
+                osValue.Printf("'%s'", poProperty->GetValueS(true));
                 break;
             default:
-                osValue.Printf("'%s'", poProperty->GetValueS());
+                osValue.Printf("'%s'", poProperty->GetValueS(true));
                 break;
             }
         }
@@ -769,7 +775,7 @@ OGRErr VFKReaderSQLite::AddFeature( IVFKDataBlock *poDataBlock,
             CPLError(CE_Failure, CPLE_AppDefined, "Cannot find property PORADOVE_CISLO_BODU");
             return OGRERR_FAILURE;
         }
-        if (!EQUAL(poProperty->GetValueS(), "1"))
+        if (poProperty->GetValueI64() != 1)
             return OGRERR_NONE;
     }
 

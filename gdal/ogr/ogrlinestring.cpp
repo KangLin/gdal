@@ -34,7 +34,7 @@
 #include <cstdlib>
 #include <algorithm>
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                           OGRSimpleCurve()                           */
@@ -451,8 +451,16 @@ void OGRSimpleCurve::setNumPoints( int nNewPointCount, int bZeroizeNewContent )
         paoPoints = paoNewPoints;
 
         if( bZeroizeNewContent )
-            memset( paoPoints + nPointCount,
-                0, sizeof(OGRRawPoint) * (nNewPointCount - nPointCount) );
+        {
+            // gcc 8.0 (dev) complains about -Wclass-memaccess since
+            // OGRRawPoint() has a constructor. So use a void* pointer.  Doing
+            // the memset() here is correct since the constructor sets to 0.  We
+            // could instead use a std::fill(), but at every other place, we
+            // treat this class as a regular POD (see above use of realloc())
+            void* dest = static_cast<void*>(paoPoints + nPointCount);
+            memset( dest,
+                    0, sizeof(OGRRawPoint) * (nNewPointCount - nPointCount) );
+        }
 
         if( flags & OGR_G_3D )
         {
@@ -1467,15 +1475,17 @@ void OGRSimpleCurve::addSubLineString( const OGRLineString *poOtherLine,
 /*      format.                                                         */
 /************************************************************************/
 
-OGRErr OGRSimpleCurve::importFromWkb( unsigned char * pabyData,
+OGRErr OGRSimpleCurve::importFromWkb( const unsigned char *pabyData,
                                       int nSize,
-                                      OGRwkbVariant eWkbVariant )
+                                      OGRwkbVariant eWkbVariant,
+                                      int& nBytesConsumedOut )
 
 {
     OGRwkbByteOrder     eByteOrder;
     int                 nDataOffset = 0;
     int                 nNewNumPoints = 0;
 
+    nBytesConsumedOut = -1;
     OGRErr eErr = importPreambuleOfCollectionFromWkb( pabyData,
                                                       nSize,
                                                       nDataOffset,
@@ -1504,6 +1514,10 @@ OGRErr OGRSimpleCurve::importFromWkb( unsigned char * pabyData,
     setNumPoints( nNewNumPoints, FALSE );
     if( nPointCount < nNewNumPoints )
         return OGRERR_FAILURE;
+
+    nBytesConsumedOut = 9 + 8 * nPointCount *
+                                    (2 + ((flags & OGR_G_3D) ? 1 : 0)+
+                                         ((flags & OGR_G_MEASURED) ? 1 : 0));
 
 /* -------------------------------------------------------------------- */
 /*      Get the vertex.                                                 */
@@ -2722,8 +2736,13 @@ OGRLineString* OGRLineString::CurveToLine(
 double OGRSimpleCurve::get_LinearArea() const
 
 {
-    if( nPointCount < 2 )
+    if( nPointCount < 2 ||
+        (WkbSize() != 0 && /* if not a linearring, check it is closed */
+            (paoPoints[0].x != paoPoints[nPointCount-1].x ||
+             paoPoints[0].y != paoPoints[nPointCount-1].y)) )
+    {
         return 0;
+    }
 
     double dfAreaSum =
         paoPoints[0].x * (paoPoints[1].y - paoPoints[nPointCount-1].y);
@@ -2811,18 +2830,32 @@ OGRLinearRing* OGRLineString::CastToLinearRing( OGRLineString* poLS )
 /*                     GetCasterToLineString()                          */
 /************************************************************************/
 
+static OGRLineString* CasterToLineString(OGRCurve* poCurve)
+{
+    OGRLineString* poLS = dynamic_cast<OGRLineString*>(poCurve);
+    CPLAssert(poLS);
+    return poLS;
+}
+
 OGRCurveCasterToLineString OGRLineString::GetCasterToLineString() const
 {
-    return (OGRCurveCasterToLineString) OGRGeometry::CastToIdentity;
+    return ::CasterToLineString;
 }
 
 /************************************************************************/
 /*                        GetCasterToLinearRing()                       */
 /************************************************************************/
 
+OGRLinearRing* OGRLineString::CasterToLinearRing(OGRCurve* poCurve)
+{
+    OGRLineString* poLS = dynamic_cast<OGRLineString*>(poCurve);
+    CPLAssert(poLS);
+    return OGRLineString::CastToLinearRing(poLS);
+}
+
 OGRCurveCasterToLinearRing OGRLineString::GetCasterToLinearRing() const
 {
-    return (OGRCurveCasterToLinearRing) OGRLineString::CastToLinearRing;
+    return OGRLineString::CasterToLinearRing;
 }
 
 /************************************************************************/

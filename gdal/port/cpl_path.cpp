@@ -49,7 +49,7 @@
 #include "cpl_string.h"
 #include "cpl_vsi.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 // Should be size of larged possible filename.
 static const int CPL_PATH_BUF_SIZE = 2048;
@@ -345,6 +345,9 @@ const char *CPLGetBasename( const char *pszFullFilename )
 const char *CPLGetExtension( const char *pszFullFilename )
 
 {
+    if( pszFullFilename[0] == '\0' )
+        return "";
+
     size_t iFileStart =
         static_cast<size_t>( CPLFindFilenameStart( pszFullFilename ) );
     char *pszStaticResult = CPLGetStaticResult();
@@ -1089,4 +1092,33 @@ const char *CPLGenerateTempFilename( const char *pszStem )
                        CPLAtomicInc( &nTempFileCounter ) );
 
     return CPLFormFilename( pszDir, osFilename, NULL );
+}
+
+/************************************************************************/
+/*                         CPLExpandTilde()                             */
+/************************************************************************/
+
+/**
+ * Expands ~/ at start of filename.
+ * 
+ * Assumes that the HOME configuration option is defined.
+ *
+ * @param pszFilename filename potentially starting with ~/
+ *
+ * @return an expanded filename.
+ *
+ * @since GDAL 2.2
+ */
+
+const char *CPLExpandTilde( const char *pszFilename )
+
+{
+    if( !STARTS_WITH_CI(pszFilename, "~/") )
+        return pszFilename;
+
+    const char* pszHome = CPLGetConfigOption("HOME", NULL);
+    if( pszHome == NULL )
+        return pszFilename;
+
+    return CPLFormFilename( pszHome, pszFilename + 2, NULL );
 }

@@ -44,7 +44,7 @@
 #include <zlib.h>
 #include <algorithm>
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 // LERC is not ready for big endian hosts for now
 #if defined(LERC) && defined(WORDS_BIGENDIAN)
@@ -503,7 +503,7 @@ int CheckFileSize(const char *fname, GIntBig sz, GDALAccess eAccess) {
 #endif
     VSIFCloseL(ifp);
     return !ret;
-};
+}
 
 // Similar to compress2() but with flags to control zlib features
 // Returns true if it worked
@@ -632,6 +632,13 @@ void GDALRegister_mrf()
         "       <Value>YCC</Value>"
         "   </Option>\n"
         "</CreationOptionList>\n");
+
+    driver->SetMetadataItem(
+      GDAL_DMD_OPENOPTIONLIST,
+      "<OpenOptionList>"
+      "    <Option name='NOERRORS' type='boolean' description='Ignore decompression errors' default='FALSE'/>"
+      "</OpenOptionList>"
+      );
 
     driver->pfnOpen = GDALMRFDataset::Open;
     driver->pfnIdentify = GDALMRFDataset::Identify;

@@ -2323,7 +2323,7 @@ def ogr_geom_compoundcurve():
     gdal.PushErrorHandler('CPLQuietErrorHandler')
     g.AddGeometry(ogr.CreateGeometryFromWkt('LINESTRING(0 0,1 1)'))
     gdal.PopErrorHandler()
-    if g.ExportToWkt() != 'COMPOUNDCURVE ((0 0,1 1))':
+    if g.ExportToWkt() != 'COMPOUNDCURVE ((0 0,1 1),(1 1,0 0))':
             gdaltest.post_reason('fail')
             return 'fail'
 
@@ -2336,7 +2336,7 @@ def ogr_geom_compoundcurve():
     gdal.PushErrorHandler('CPLQuietErrorHandler')
     g.AddGeometryDirectly(ogr.CreateGeometryFromWkt('LINESTRING(0 0,1 1)'))
     gdal.PopErrorHandler()
-    if g.ExportToWkt() != 'COMPOUNDCURVE ((0 0,1 1))':
+    if g.ExportToWkt() != 'COMPOUNDCURVE ((0 0,1 1),(1 1,0 0))':
             gdaltest.post_reason('fail')
             return 'fail'
 
@@ -4197,6 +4197,37 @@ def ogr_geom_triangle_ps_tin_conversion():
     return 'success'
 
 ###############################################################################
+def ogr_geom_multipoint_envelope_bug():
+
+    g = ogr.CreateGeometryFromWkt('MULTIPOINT(0 0,1 1)')
+    minx, maxx, miny, maxy = g.GetEnvelope()
+    if (minx, maxx, miny, maxy) != (0, 1, 0, 1):
+        gdaltest.post_reason('fail')
+        print(minx, maxx, miny, maxy)
+        return 'fail'
+
+    g = ogr.CreateGeometryFromWkt('MULTIPOINT(0 0 0,1 1 1)')
+    minx, maxx, miny, maxy, minz, maxz = g.GetEnvelope3D()
+    if (minx, maxx, miny, maxy, minz, maxz) != (0, 1, 0, 1, 0, 1):
+        gdaltest.post_reason('fail')
+        print(minx, maxx, miny, maxy, minz, maxz)
+        return 'fail'
+
+    return 'success'
+
+
+###############################################################################
+def ogr_geom_polygon_empty_ring():
+
+    g = ogr.Geometry( ogr.wkbPolygon )
+    g2 = ogr.Geometry( ogr.wkbLinearRing )
+    g.AddGeometryDirectly( g2 )
+    if not g.IsEmpty():
+        return 'fail'
+
+    return 'success'
+
+###############################################################################
 # cleanup
 
 def ogr_geom_cleanup():
@@ -4261,6 +4292,8 @@ gdaltest_list = [
     ogr_geom_curve_surface,
     ogr_geom_import_corrupted_wkb,
     ogr_geom_triangle_ps_tin_conversion,
+    ogr_geom_multipoint_envelope_bug,
+    ogr_geom_polygon_empty_ring,
     ogr_geom_cleanup ]
 
 # gdaltest_list = [ ogr_geom_triangle_ps_tin_conversion ]

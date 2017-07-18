@@ -35,7 +35,7 @@
 #include "cpl_conv.h"
 #include "cpl_string.h"
 
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                           GMLPropertyDefn                            */
@@ -146,7 +146,7 @@ void GMLPropertyDefn::AnalysePropertyValue( const GMLProperty *psGMLProperty,
         const CPLValueType valueType = CPLGetValueType(pszValue);
 
         if (valueType == CPL_VALUE_STRING &&
-            m_eType != GMLPT_String && 
+            m_eType != GMLPT_String &&
             m_eType != GMLPT_StringList )
         {
             if( (m_eType == GMLPT_Untyped || m_eType == GMLPT_Boolean) &&

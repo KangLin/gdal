@@ -46,7 +46,7 @@ typedef enum
 
 class OGRElasticDataSource;
 
-
+// cppcheck-suppress copyCtorAndEqOperator
 class OGRESSortDesc
 {
     public:
@@ -204,7 +204,7 @@ public:
     void                SetNextFID(GIntBig nNextFID) { m_nNextFID = nNextFID; }
 
     OGRElasticLayer*    Clone() const;
-    void                SetOrderBy( const std::vector<OGRESSortDesc>& v ) 
+    void                SetOrderBy( const std::vector<OGRESSortDesc>& v )
                                                         { m_aoSortColumns = v; }
 };
 

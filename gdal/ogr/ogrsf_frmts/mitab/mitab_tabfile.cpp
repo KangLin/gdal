@@ -29,88 +29,33 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
- **********************************************************************
- *
- * $Log: mitab_tabfile.cpp,v $
- * Revision 1.78  2010-10-08 18:40:12  aboudreault
- * Fixed missing initializations that cause crashes
- *
- * Revision 1.77  2010-10-08 18:38:13  aboudreault
- * Added attribute index support for the sql queries in mapinfo tab format
- * (GDAL bug #3687)
- *
- * Revision 1.76  2010-07-07 19:00:15  aboudreault
- * Cleanup Win32 Compile Warnings (GDAL bug #2930)
- *
- * Revision 1.75  2010-07-05 14:58:33  aboudreault
- * Fixed bad feature count after we deleted a feature in MapInfo (bug 2227)
- *
- * Revision 1.74  2010-01-07 20:39:12  aboudreault
- * Added support to handle duplicate field names, Added validation to check
- * if a field name start with a number (bug 2141)
- *
- * Revision 1.73  2008-11-27 20:50:23  aboudreault
- * Improved support for OGR date/time types. New Read/Write methods (bug 1948)
- * Added support of OGR date/time types for MIF features.
- *
- * Revision 1.72  2008/11/17 22:06:21  aboudreault
- * Added support to use OFTDateTime/OFTDate/OFTTime type when compiled with
- * OGR and fixed reading/writing support for these types.
- *
- * Revision 1.71  2008/09/26 14:40:24  aboudreault
- * Fixed bug: MITAB doesn't support writing DateTime type (bug 1948)
- *
- * Revision 1.70  2008/06/13 18:39:21  aboudreault
- * Fixed problem with corrupt pointer if file not found (bug 1899) and
- * fixed tabdump build problem if DEBUG option not provided (bug 1898)
- *
- * Revision 1.69  2008/03/05 20:59:10  dmorissette
- * Purged CVS logs in header
- *
- * Revision 1.68  2008/03/05 20:35:39  dmorissette
- * Replace MITAB 1.x SetFeature() with a CreateFeature() for V2.x (bug 1859)
- *
- * Revision 1.67  2008/01/29 21:56:39  dmorissette
- * Update dataset version properly for Date/Time/DateTime field types (#1754)
- *
- * Revision 1.66  2008/01/29 20:46:32  dmorissette
- * Added support for v9 Time and DateTime fields (byg 1754)
- *
- * Revision 1.65  2007/09/12 20:22:31  dmorissette
- * Added TABFeature::CreateFromMapInfoType()
- *
- * Revision 1.64  2007/06/21 14:00:23  dmorissette
- * Added missing cast in isspace() calls to avoid failed assertion on Windows
- * (MITAB bug 1737, GDAL ticket 1678))
- *
- * Revision 1.63  2007/06/12 13:52:38  dmorissette
- * Added IMapInfoFile::SetCharset() method (bug 1734)
- *
- * Revision 1.62  2007/06/12 12:50:40  dmorissette
- * Use Quick Spatial Index by default until bug 1732 is fixed (broken files
- * produced by current coord block splitting technique).
- *
- * Revision 1.61  2007/03/21 21:15:56  dmorissette
- * Added SetQuickSpatialIndexMode() which generates a non-optimal spatial
- * index but results in faster write time (bug 1669)
- *
- * ...
- *
- * Revision 1.1  1999/07/12 04:18:25  daniel
- * Initial checkin
- *
  **********************************************************************/
 
+#include "cpl_port.h"
 #include "mitab.h"
-#include "mitab_utils.h"
-#include "cpl_minixml.h"
-#include "ogr_p.h"
 
-#include <ctype.h>      /* isspace() */
-
+#include <cctype>
+#include <climits>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <algorithm>
 
-CPL_CVSID("$Id$");
+#include "cpl_conv.h"
+#include "cpl_error.h"
+#include "cpl_minixml.h"
+#include "cpl_string.h"
+#include "cpl_vsi.h"
+#include "mitab_priv.h"
+#include "mitab_utils.h"
+#include "ogr_core.h"
+#include "ogr_feature.h"
+#include "ogr_geometry.h"
+#include "ogr_p.h"
+#include "ogr_spatialref.h"
+#include "ogrsf_frmts.h"
+
+CPL_CVSID("$Id$")
 
 static const char UNSUPPORTED_OP_READ_ONLY[] =
   "%s : unsupported operation on a read-only datasource.";
@@ -714,7 +659,7 @@ int TABFile::ParseTABFileFields()
         while(*pszStr != '\0' && isspace((unsigned char)*pszStr))
             pszStr++;
 
-        if (STARTS_WITH_CI(pszStr, "Fields"))
+        if (STARTS_WITH_CI(pszStr, "Fields") && CPLStrnlen(pszStr, 7) >= 7)
         {
             /*---------------------------------------------------------
              * We found the list of table fields

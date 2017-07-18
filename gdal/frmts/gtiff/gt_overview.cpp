@@ -28,15 +28,29 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
-#include "gdal_priv.h"
+#include "cpl_port.h"
 #include "gt_overview.h"
+
+#include <cstdlib>
+#include <cstring>
+
+#include <algorithm>
+#include <string>
+
+#include "cpl_conv.h"
+#include "cpl_error.h"
+#include "cpl_progress.h"
+#include "cpl_string.h"
+#include "cpl_vsi.h"
+#include "gdal.h"
+#include "gdal_priv.h"
 #include "gtiff.h"
+#include "tiff.h"
+#include "tiffvers.h"
 #include "tifvsi.h"
 #include "xtiffio.h"
 
-#include <algorithm>
-
-CPL_CVSID("$Id$");
+CPL_CVSID("$Id$")
 
 // TODO(schwehr): Explain why 128 and not 127.
 static const int knMaxOverviews = 128;
@@ -145,6 +159,13 @@ toff_t GTIFFWriteDirectory( TIFF *hTIFF, int nSubfileType,
                                                                 "MINISBLACK",
                               pszJPEGQuality,
                               pszJPEGTablesMode );
+
+        if( nPhotometric == PHOTOMETRIC_YCBCR )
+        {
+            // Explicitly register the subsampling so that JPEGFixupTags
+            // is a no-op (helps for cloud optimized geotiffs)
+            TIFFSetField( hTIFF, TIFFTAG_YCBCRSUBSAMPLING, 2, 2 );
+        }
     }
 
 /* -------------------------------------------------------------------- */
